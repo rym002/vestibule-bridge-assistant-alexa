@@ -1,0 +1,42 @@
+{
+  "name": "@vestibule-link/bridge-assistant-alexa",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/index.js",
+  "scripts": {
+    "prepack": "tsc",
+    "test": "mocha -r ts-node/register --extension ts --recursive",
+    "clean": "rm .npmrc"
+  },
+  "keywords": [],
+  "author": "Raymond Munian",
+  "license": "ISC",
+  "repository": {
+    "url": "https://github.com/rym002/vestibule-bridge-assistant-alexa",
+    "type": "git"
+  },
+  "dependencies": {
+    "@vestibule-link/alexa-video-skill-types": "^1.1.1",
+    "aws-iot-device-sdk": "^2.2.1",
+    "lodash": "^4.17.15"
+  },
+  "peerDependencies": {
+    "@vestibule-link/bridge-assistant": "^1.0.2"
+  },
+  "devDependencies": {
+    "@types/aws-iot-device-sdk": "^2.2.0",
+    "@types/chai": "^4.2.0",
+    "@types/lodash": "^4.14.137",
+    "@types/mocha": "^5.2.7",
+    "@types/node": "^12.7.2",
+    "@types/sinon": "^7.0.13",
+    "@vestibule-link/bridge": "^1.0.0",
+    "@vestibule-link/bridge-assistant": "^1.0.2",
+    "@vestibule-link/iot-types": "^1.1.2",
+    "chai": "^4.2.0",
+    "mocha": "^6.2.0",
+    "sinon": "^7.4.1",
+    "ts-node": "^8.3.0",
+    "typescript": "^3.5.3"
+  }
+}

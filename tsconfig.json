@@ -1,0 +1,22 @@
+{
+    "compilerOptions": {
+        "baseUrl": "src",
+        "module": "commonjs",
+        "sourceMap": true,
+        "watch": false,
+        "target": "es2018",
+        "outDir": "dist",
+        "declaration": true,
+        "moduleResolution": "node",
+        "strict": false,
+        "strictNullChecks": false,
+        "strictBindCallApply": true,
+        "strictFunctionTypes": true,
+        "strictPropertyInitialization": false
+    },
+    "exclude": [
+        "dist",
+        "node_modules",
+        "test"
+    ]
+}

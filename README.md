@@ -1,0 +1,2 @@
+# @vestibule-link/bridge-assistant-alexa
+* Alexa Assistant for vestibule bridge ![Build Status](https://codebuild.us-east-1.amazonaws.com/badges?uuid=eyJlbmNyeXB0ZWREYXRhIjoia0FBZzBPNDdKYjM4UkQ4ZjJTeThwWHoxU1JiWElqSzBDUmY5YnFLK3FrOWVqbGNPVC9ST1ZyS21qMDhSejBkYkNHOTV1NTgrSzdZZ0Y0NGVYeWFybkRzPSIsIml2UGFyYW1ldGVyU3BlYyI6IjJseGZuWnM4b1VoVkduOCsiLCJtYXRlcmlhbFNldFNlcmlhbCI6MX0%3D&branch=master)
