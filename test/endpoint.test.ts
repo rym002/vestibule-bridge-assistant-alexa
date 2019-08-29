@@ -1,11 +1,11 @@
-import 'mocha'
-import { registerAssistant, AlexaEndpointEmitter } from '../src/endpoint'
-import { assert, expect } from 'chai'
+import { SeekController } from '@vestibule-link/alexa-video-skill-types';
 import { providersEmitter, responseRouter } from '@vestibule-link/bridge-assistant';
+import { ResponseMessage, SubType } from '@vestibule-link/iot-types';
+import { assert, expect } from 'chai';
+import 'mocha';
 import { createSandbox, SinonSandbox, SinonStub } from 'sinon';
-import { SubType, ResponseMessage } from '@vestibule-link/iot-types';
 import { DirectiveHandlers, SupportedDirectives } from '../src/directive';
-import { SeekController, RecordController } from '@vestibule-link/alexa-video-skill-types';
+import { AlexaEndpointEmitter, registerAssistant } from '../src/endpoint';
 
 class TestDirectiveHandler implements SubType<DirectiveHandlers, 'Alexa.SeekController'>{
     readonly supported: SupportedDirectives<'Alexa.SeekController'> = ['AdjustSeekPosition'];
