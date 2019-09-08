@@ -36,19 +36,28 @@ export interface AlexaEndpointEmitter extends EndpointEmitter<'alexa'> {
     emit(event: 'refreshState'|'refreshCapability'|'refreshInfo', deltaId: symbol): boolean;
     emit(event: 'refreshState'|'refreshCapability'|'refreshInfo', deltaId: symbol): boolean;
     on(event: 'refreshState'|'refreshCapability'|'refreshInfo', listener: (deltaId: symbol) => void): this;
+    once(event: 'refreshState'|'refreshCapability'|'refreshInfo', listener: (deltaId: symbol) => void): this;
+    removeListener(event: 'refreshState'|'refreshCapability'|'refreshInfo', listener: (deltaId: symbol) => void): this;
     emit(event: 'delta', data: AlexaEndpoint, deltaId: symbol): boolean;
     on(event: 'delta', listener: (data: AlexaEndpoint, deltaId: symbol) => void): this;
+    once(event: 'delta', listener: (data: AlexaEndpoint, deltaId: symbol) => void): this;
     removeListener(event: 'delta', listener: (data: AlexaEndpoint, deltaId: symbol) => void): this;
     emit(event: 'info', data: EndpointInfo, deltaId: symbol): boolean;
     on(event: 'info', listener: (data: EndpointInfo, deltaId: symbol) => void): this;
+    once(event: 'info', listener: (data: EndpointInfo, deltaId: symbol) => void): this;
+    removeListener(event: 'info', listener: (data: EndpointInfo, deltaId: symbol) => void): this;
     emit<NS extends keyof EndpointCapability>(event: 'capability', namespace: NS, value: SubType<EndpointCapability, NS>, deltaId: symbol): boolean;
     on<NS extends keyof EndpointCapability>(event: 'capability', listener: (namespace: NS, value: SubType<EndpointCapability, NS>, deltaId: symbol) => void): this;
+    once<NS extends keyof EndpointCapability>(event: 'capability', listener: (namespace: NS, value: SubType<EndpointCapability, NS>, deltaId: symbol) => void): this;
+    removeListener<NS extends keyof EndpointCapability>(event: 'capability', listener: (namespace: NS, value: SubType<EndpointCapability, NS>, deltaId: symbol) => void): this;
     emit<NS extends keyof EndpointState, N extends keyof EndpointState[NS]>(event: 'state', namespace: NS, name: N, value: SubType<SubType<EndpointState, NS>, N>, deltaId: symbol): boolean;
     on<NS extends keyof EndpointState, N extends keyof EndpointState[NS]>(event: 'state', listener: (namespace: NS, name: N, value: SubType<SubType<EndpointState, NS>, N>, deltaId: symbol) => void): this;
     once<NS extends keyof EndpointState, N extends keyof EndpointState[NS]>(event: 'state', listener: (namespace: NS, name: N, value: SubType<SubType<EndpointState, NS>, N>, deltaId: symbol) => void): this;
     removeListener<NS extends keyof EndpointState, N extends keyof EndpointState[NS]>(event: 'state', listener: (namespace: NS, name: N, value: SubType<SubType<EndpointState, NS>, N>, deltaId: symbol) => void): this;
     emit(event: CommandType, commandArgs: string[], request: any, messageId: symbol): boolean;
     on(event: CommandType, listener: (commandArgs: string[], request: any, messageId: symbol) => void): this;
+    once(event: CommandType, listener: (commandArgs: string[], request: any, messageId: symbol) => void): this;
+    removeListener(event: CommandType, listener: (commandArgs: string[], request: any, messageId: symbol) => void): this;
 }
 
 
@@ -65,6 +74,7 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
         this.on('info', this.updateInfo);
         this.on('capability', this.updateCapability);
         this.on('state', this.updateState);
+        this.setMaxListeners(20)
     }
 
     registerDirectiveHandler<NS extends keyof DirectiveHandlers>(namespace: NS, directiveHandler: SubType<DirectiveHandlers, NS>): void {
