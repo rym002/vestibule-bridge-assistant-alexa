@@ -190,6 +190,7 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
 }
 
 function routeError(error: ErrorHolder, messageId: symbol) {
+    console.error(error);
     responseRouter.emit(messageId, {
         error: true,
         payload: error
