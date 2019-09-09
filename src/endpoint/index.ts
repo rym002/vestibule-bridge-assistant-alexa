@@ -33,11 +33,10 @@ export interface AlexaEndpointEmitter extends EndpointEmitter<'alexa'> {
     registerDirectiveHandler<NS extends keyof DirectiveHandlers>(namespace: NS, directiveHandler: SubType<DirectiveHandlers, NS>): void;
     completeDelta(deltaId: symbol): Promise<void>;
     watchDeltaUpdate(promise: Promise<void>, deltaId: symbol): void;
-    emit(event: 'refreshState'|'refreshCapability'|'refreshInfo', deltaId: symbol): boolean;
-    emit(event: 'refreshState'|'refreshCapability'|'refreshInfo', deltaId: symbol): boolean;
-    on(event: 'refreshState'|'refreshCapability'|'refreshInfo', listener: (deltaId: symbol) => void): this;
-    once(event: 'refreshState'|'refreshCapability'|'refreshInfo', listener: (deltaId: symbol) => void): this;
-    removeListener(event: 'refreshState'|'refreshCapability'|'refreshInfo', listener: (deltaId: symbol) => void): this;
+    emit(event: 'refreshState' | 'refreshCapability' | 'refreshInfo', deltaId: symbol): boolean;
+    on(event: 'refreshState' | 'refreshCapability' | 'refreshInfo', listener: (deltaId: symbol) => void): this;
+    once(event: 'refreshState' | 'refreshCapability' | 'refreshInfo', listener: (deltaId: symbol) => void): this;
+    removeListener(event: 'refreshState' | 'refreshCapability' | 'refreshInfo', listener: (deltaId: symbol) => void): this;
     emit(event: 'delta', data: AlexaEndpoint, deltaId: symbol): boolean;
     on(event: 'delta', listener: (data: AlexaEndpoint, deltaId: symbol) => void): this;
     once(event: 'delta', listener: (data: AlexaEndpoint, deltaId: symbol) => void): this;
@@ -159,6 +158,7 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
                     const respPayload = await handleFunction.bind(directiveHandler)(request);
                     const resp: ResponseMessage<any> = {
                         payload: respPayload.payload,
+                        stateChange: respPayload.state,
                         error: false
                     }
                     this.alexaDirectiveEmitter.emit(namespace, name, request);
