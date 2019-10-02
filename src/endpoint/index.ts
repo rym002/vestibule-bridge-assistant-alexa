@@ -171,7 +171,7 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
                     errorType: 'Alexa',
                     errorPayload: {
                         type: 'NOT_SUPPORTED_IN_CURRENT_MODE',
-                        message: 'Not supported command'
+                        message: 'Not supported command:' + namespace + ':' + nameValue
                     }
                 }
                 routeError(error, messageId);
@@ -181,7 +181,7 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
                 errorType: 'Alexa',
                 errorPayload: {
                     type: 'INVALID_DIRECTIVE',
-                    message: 'Directive Handler Not Found'
+                    message: 'Directive Handler Not Found:' + namespace
                 }
             }
             routeError(error, messageId);
