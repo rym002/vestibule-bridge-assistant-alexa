@@ -126,10 +126,10 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
         this.alexaStateEmitter.emit(namespace, name, value);
     }
     private mergeState<NS extends keyof EndpointState, N extends keyof EndpointState[NS]>(namespace: NS, name: N, value: SubType<SubType<EndpointState, NS>, N>, endpoint: AlexaEndpoint) {
-        let nsValue = this.endpoint[namespace];
+        let nsValue = endpoint[namespace];
         if (!nsValue) {
             nsValue = {};
-            this.endpoint[namespace] = nsValue;
+            endpoint[namespace] = nsValue;
         }
         nsValue[name] = value;
     }
