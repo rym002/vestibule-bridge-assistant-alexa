@@ -8,7 +8,7 @@ export const alexaConfig = {
 }
 
 const directive = topicConfig.root + alexaConfig.clientId + topicConfig.directive + '#';
-export const settingsTopic = topicConfig.root + alexaConfig.clientId + topicConfig.endpoint + '/'
+export const settingsTopic = topicConfig.root + alexaConfig.clientId + topicConfig.endpoint
 
 function connectedPromise(shadow: thingShadow) {
     return (resolve: CallableFunction, reject: CallableFunction) => {
