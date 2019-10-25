@@ -2,6 +2,7 @@ import { AlexaEndpoint, EndpointState, SubType, EndpointInfo, EndpointCapability
 import { DirectiveHandlers, DirectiveRequest } from '../directive';
 import { CommandType, responseRouter, EndpointEmitter, providersEmitter, Assistant } from '@vestibule-link/bridge-assistant';
 import { EventEmitter } from 'events';
+import * as _ from 'lodash';
 
 export interface StateEmitter {
     refreshState(deltaId: symbol): void;
@@ -31,7 +32,8 @@ export interface AlexaEndpointEmitter extends EndpointEmitter<'alexa'> {
     readonly endpoint: AlexaEndpoint;
     readonly directiveHandlers: DirectiveHandlers
     registerDirectiveHandler<NS extends keyof DirectiveHandlers>(namespace: NS, directiveHandler: SubType<DirectiveHandlers, NS>): void;
-    completeDelta(deltaId: symbol): Promise<void>;
+    completeDeltaState(deltaId: symbol): Promise<void>;
+    completeDeltaSettings(deltaId: symbol): Promise<void>;
     watchDeltaUpdate(promise: Promise<void>, deltaId: symbol): void;
     emit(event: 'refreshState' | 'refreshCapability' | 'refreshInfo', deltaId: symbol): boolean;
     on(event: 'refreshState' | 'refreshCapability' | 'refreshInfo', listener: (deltaId: symbol) => void): this;
@@ -57,15 +59,22 @@ export interface AlexaEndpointEmitter extends EndpointEmitter<'alexa'> {
     on(event: CommandType, listener: (commandArgs: string[], request: any, messageId: symbol) => void): this;
     once(event: CommandType, listener: (commandArgs: string[], request: any, messageId: symbol) => void): this;
     removeListener(event: CommandType, listener: (commandArgs: string[], request: any, messageId: symbol) => void): this;
+    emit(event: 'settings', data: EndpointSettings): boolean
+    on(event: 'settings', listener: (data: EndpointSettings) => void): this
+    once(event: 'settings', listener: (data: EndpointSettings) => void): this
+    removeListener(event: 'settings', listener: (data: EndpointSettings) => void): this
 }
 
-
+type EndpointSettings = 
+    EndpointCapability
+    & Partial<Pick<EndpointInfo,Exclude<keyof EndpointInfo,'endpointId'>>>
 class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpointEmitter {
     readonly alexaStateEmitter: AlexaStateEmitter = new EventEmitter();
     readonly alexaDirectiveEmitter: AlexaDirectiveEmitter = new EventEmitter();
     readonly endpoint: AlexaEndpoint = {};
     private readonly deltaPromises = new Map<symbol, Promise<void>[]>();
-    private readonly deltaEndpoints = new Map<symbol, AlexaEndpoint>();
+    private readonly deltaEndpointsState = new Map<symbol, AlexaEndpoint>();
+    private readonly deltaEndpointSettings = new Map<symbol, EndpointSettings>();
     readonly directiveHandlers: DirectiveHandlers = {};
     constructor(readonly endpointId: string) {
         super();
@@ -88,28 +97,28 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
         transPromises.push(promise);
     }
     private getDeltaEndpoint(deltaId: symbol) {
-        let deltaEndpoint = this.deltaEndpoints.get(deltaId);
+        let deltaEndpoint = this.deltaEndpointsState.get(deltaId);
         if (!deltaEndpoint) {
             deltaEndpoint = {};
-            this.deltaEndpoints.set(deltaId, deltaEndpoint);
+            this.deltaEndpointsState.set(deltaId, deltaEndpoint);
+        }
+        return deltaEndpoint;
+    }
+    private getDeltaSettings(deltaId:symbol){
+        let deltaEndpoint = this.deltaEndpointSettings.get(deltaId);
+        if (!deltaEndpoint) {
+            deltaEndpoint = {
+
+            };
+            this.deltaEndpointSettings.set(deltaId, deltaEndpoint);
         }
         return deltaEndpoint;
     }
     private updateInfo(data: EndpointInfo, deltaId: symbol) {
-        this.endpoint.info = data;
-        this.getDeltaEndpoint(deltaId).info = data;
+        _.merge(this.getDeltaSettings(deltaId), data);
     }
     private updateCapability<NS extends keyof EndpointCapability>(namespace: NS, value: SubType<EndpointCapability, NS>, deltaId: symbol) {
-        this.mergeCapability(namespace, value, this.endpoint);
-        this.mergeCapability(namespace, value, this.getDeltaEndpoint(deltaId));
-    }
-    private mergeCapability<NS extends keyof EndpointCapability>(namespace: NS, value: SubType<EndpointCapability, NS>, endpoint: AlexaEndpoint) {
-        let capabilities = endpoint.capabilities;
-        if (!capabilities) {
-            capabilities = {};
-            endpoint.capabilities = capabilities;
-        }
-        capabilities[namespace] = value;
+        this.getDeltaSettings(deltaId)[namespace]=value;
     }
     private updateState<NS extends keyof EndpointState, N extends keyof EndpointState[NS]>(namespace: NS, name: N, value: SubType<SubType<EndpointState, NS>, N>, deltaId: symbol) {
         this.mergeState(namespace, name, value, this.endpoint);
@@ -117,15 +126,10 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
         this.alexaStateEmitter.emit(namespace, name, value);
     }
     private mergeState<NS extends keyof EndpointState, N extends keyof EndpointState[NS]>(namespace: NS, name: N, value: SubType<SubType<EndpointState, NS>, N>, endpoint: AlexaEndpoint) {
-        let states = endpoint.states;
-        if (!states) {
-            states = {};
-            endpoint.states = states
-        }
-        let nsValue = states[namespace];
+        let nsValue = this.endpoint[namespace];
         if (!nsValue) {
             nsValue = {};
-            states[namespace] = nsValue;
+            this.endpoint[namespace] = nsValue;
         }
         nsValue[name] = value;
     }
@@ -133,17 +137,25 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
         this.emit('refreshState', deltaId);
         this.emit('refreshInfo', deltaId);
         this.emit('refreshCapability', deltaId);
-        await this.completeDelta(deltaId);
+        await this.completeDeltaState(deltaId);
     }
 
-    async completeDelta(deltaId: symbol) {
+    private async waitDeltaPromises(deltaId:symbol){
         const promises = this.deltaPromises.get(deltaId);
         if (promises) {
             await Promise.all(promises);
             this.deltaPromises.delete(deltaId);
         }
-        this.emit('delta', this.deltaEndpoints.get(deltaId), deltaId);
-        this.deltaEndpoints.delete(deltaId);
+    }
+    async completeDeltaState(deltaId: symbol) {
+        await this.waitDeltaPromises(deltaId);
+        this.emit('delta', this.deltaEndpointsState.get(deltaId), deltaId);
+        this.deltaEndpointsState.delete(deltaId);
+    }
+    async completeDeltaSettings(deltaId: symbol) {
+        await this.waitDeltaPromises(deltaId);
+        this.emit('settings', this.deltaEndpointSettings.get(deltaId));
+        this.deltaEndpointSettings.delete(deltaId);
     }
     private async delegateDirective<NS extends keyof DirectiveHandlers, N extends keyof DirectiveHandlers[NS]>(commandArgs: string[], request: any, messageId: symbol): Promise<void> {
         const [namespaceValue, nameValue] = [...commandArgs];

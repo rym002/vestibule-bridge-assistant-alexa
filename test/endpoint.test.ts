@@ -51,7 +51,7 @@ describe('endpoint', () => {
     afterEach(() => {
         sandbox.restore();
     })
-    it('should emit delta', () => {
+    it('should emit delta', async () => {
         const endpointEmitter = <AlexaEndpointEmitter>providersEmitter.getEndpointEmitter('alexa', {
             provider: 'testProvider',
             host: 'testDelta'
@@ -59,10 +59,24 @@ describe('endpoint', () => {
         const deltaId = Symbol()
         const emitStub = sandbox.stub(providersEmitter, 'emit');
         endpointEmitter.emit('state', 'Alexa.PlaybackStateReporter', 'playbackState', 'PLAYING', deltaId);
-        endpointEmitter.completeDelta(deltaId);
-        assert(emitStub.calledOnce)
+        await endpointEmitter.completeDeltaState(deltaId);
+        assert(emitStub.called)
     })
 
+    it('should emit settings',async ()=>{
+        const endpointEmitter = <AlexaEndpointEmitter>providersEmitter.getEndpointEmitter('alexa', {
+            provider: 'testProvider',
+            host: 'testSettings'
+        }, true)
+        const deltaId = Symbol()
+        const emitStub = sandbox.stub(providersEmitter.getEndpointSettingsEmitter('alexa'), 'emit');
+        endpointEmitter.emit('capability','Alexa.ChannelController',['channel'], deltaId);
+        await endpointEmitter.completeDeltaSettings(deltaId);
+        assert(emitStub.calledOnceWith('settings','testProvider@testSettings',{
+            'Alexa.ChannelController':['channel']
+        }))
+
+    })
     it('should request an endpoint refresh', () => {
         const endpointEmitter = <AlexaEndpointEmitter>providersEmitter.getEndpointEmitter('alexa', {
             provider: 'testProvider',

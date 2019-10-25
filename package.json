@@ -21,22 +21,22 @@
     "lodash": "^4.17.15"
   },
   "peerDependencies": {
-    "@vestibule-link/bridge-assistant": "^1.0.5"
+    "@vestibule-link/bridge-assistant": "^1.0.10"
   },
   "devDependencies": {
     "@types/aws-iot-device-sdk": "^2.2.0",
-    "@types/chai": "^4.2.1",
-    "@types/lodash": "^4.14.138",
+    "@types/chai": "^4.2.4",
+    "@types/lodash": "^4.14.144",
     "@types/mocha": "^5.2.7",
-    "@types/node": "^12.7.4",
-    "@types/sinon": "^7.0.13",
-    "@vestibule-link/bridge": "^1.1.0",
-    "@vestibule-link/bridge-assistant": "^1.0.5",
-    "@vestibule-link/iot-types": "^1.1.2",
+    "@types/node": "^12.11.7",
+    "@types/sinon": "^7.5.0",
+    "@vestibule-link/bridge": "^1.1.2",
+    "@vestibule-link/bridge-assistant": "^1.0.10",
+    "@vestibule-link/iot-types": "^2.0.2",
     "chai": "^4.2.0",
-    "mocha": "^6.2.0",
-    "sinon": "^7.4.2",
-    "ts-node": "^8.3.0",
-    "typescript": "^3.6.2"
+    "mocha": "^6.2.2",
+    "sinon": "^7.5.0",
+    "ts-node": "^8.4.1",
+    "typescript": "^3.6.4"
   }
 }

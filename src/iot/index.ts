@@ -1,11 +1,10 @@
 import { providersEmitter, responseRouter, topicHandler } from '@vestibule-link/bridge-assistant';
-import { AssistantType, Providers, Shadow } from '@vestibule-link/iot-types';
+import { AssistantType, Providers, Shadow, toLocalEndpoint, generateTopic } from '@vestibule-link/iot-types';
 import { thingShadow } from 'aws-iot-device-sdk';
 import * as _ from 'lodash';
 import { routeStateDelta } from '../state';
 import stateDiff from '../state/statediff';
-import { alexaConfig, createShadow } from './shadow';
-
+import { alexaConfig, createShadow, settingsTopic } from './shadow';
 
 
 class AlexaRouter {
@@ -19,9 +18,12 @@ class AlexaRouter {
             .on('status', this.statusUpdate.bind(this))
             .on('delta', routeStateDelta);
         providersEmitter.on(this.assistant, this.providers.bind(this));
+        providersEmitter.getEndpointSettingsEmitter('alexa').on('settings',this.sendEndpointSettings.bind(this));
         responseRouter.on(this.assistant, this.sendResponse.bind(this));
     }
-
+    private sendEndpointSettings(endpointId:string,data:any){
+        this.thingShadow.publish(settingsTopic + generateTopic(toLocalEndpoint(endpointId)),JSON.stringify(data))
+    }
     sendStateUpdate(shadow: Shadow): Promise<void> {
         const promise = new Promise<void>((resolve, reject) => {
             if (this.lastClientToken) {

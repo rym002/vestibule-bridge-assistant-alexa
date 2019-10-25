@@ -8,11 +8,12 @@ export const alexaConfig = {
 }
 
 const directive = topicConfig.root + alexaConfig.clientId + topicConfig.directive + '#';
+export const settingsTopic = topicConfig.root + alexaConfig.clientId + topicConfig.endpoint + '/'
 
 function connectedPromise(shadow: thingShadow) {
     return (resolve: CallableFunction, reject: CallableFunction) => {
         console.time('shadowConnection');
-        shadow.on('connect', () => {
+        shadow.once('connect', () => {
             console.timeEnd('shadowConnection');
             const regPromise = new Promise(registrationPromise(shadow));
             const subPromise = new Promise(subscribePromise(shadow));
@@ -21,7 +22,7 @@ function connectedPromise(shadow: thingShadow) {
                     reconnected(shadow);
                     resolve();
                 }).catch(err => {
-                    resolve(err);
+                    reject(err);
                 });
         })
     }
