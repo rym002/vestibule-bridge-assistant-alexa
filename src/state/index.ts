@@ -24,8 +24,7 @@ export function routeStateDelta(thingName: string, shadowObject: DeltaShadow): v
     const endpoints = shadowObject.state.endpoints;
     _.map(endpoints, (endpoint, endpointId) => {
         const endpointEmitter = <AlexaEndpointEmitter>providersEmitter.getEndpointEmitter('alexa', toLocalEndpoint(endpointId));
-        const endpointStates = endpoint.states;
-        _.map(endpointStates, (desiredState, stateId) => {
+        _.map(endpoint, (desiredState, stateId) => {
             const stateHandler = stateHandlers[stateId];
             if (!stateHandler) {
                 const error: ErrorHolder = {
