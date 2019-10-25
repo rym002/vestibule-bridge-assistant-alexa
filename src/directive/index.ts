@@ -24,12 +24,7 @@ export type DirectiveHandlers = Partial<{
             DirectiveResponse[NS][DN] extends { payload: any }
             ? (payload: Directive.NamedMessage[NS][N]['payload']) => Promise<{
                 payload: DirectiveResponse[NS][DN]['payload']
-                state?: Partial<{
-                    [ENS in keyof EndpointState]:
-                    ENS extends NS
-                    ? EndpointState[ENS]
-                    : never
-                }>
+                state?: EndpointState
             }>
             : never
         }[keyof DirectiveResponse[NS]]
