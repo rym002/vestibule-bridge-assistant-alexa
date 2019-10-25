@@ -13,8 +13,8 @@ export function startModule() {
         moduleId = registerModule({
             name: 'assistant-alexa',
             init: async () => {
-                await init();
                 registerAssistant();
+                await init();
             },
             depends:[assistantStartModule()]
         })
