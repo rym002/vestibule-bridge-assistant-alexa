@@ -138,6 +138,7 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
         this.emit('refreshInfo', deltaId);
         this.emit('refreshCapability', deltaId);
         await this.completeDeltaState(deltaId);
+        await this.completeDeltaSettings(deltaId);
     }
 
     private async waitDeltaPromises(deltaId:symbol){
