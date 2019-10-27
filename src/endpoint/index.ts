@@ -163,6 +163,7 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
         const namespace = <NS>namespaceValue;
         const name = <N>nameValue;
         const directiveHandler = this.directiveHandlers[namespace];
+        console.time(messageId.toString())
         if (directiveHandler) {
             const supported: string[] = directiveHandler.supported;
             if (supported.indexOf(nameValue) >= 0) {
@@ -176,8 +177,10 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
                     }
                     this.alexaDirectiveEmitter.emit(namespace, name, request);
                     responseRouter.emit(messageId, resp);
+                    console.timeEnd(messageId.toString())
                 } catch (err) {
                     routeError(err, messageId);
+                    console.timeEnd(messageId.toString())
                 }
             } else {
                 const error: ErrorHolder = {
@@ -188,6 +191,7 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
                     }
                 }
                 routeError(error, messageId);
+                console.timeEnd(messageId.toString())
             }
         } else {
             const error: ErrorHolder = {
@@ -198,6 +202,7 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
                 }
             }
             routeError(error, messageId);
+            console.timeEnd(messageId.toString())
         }
     }
 }
