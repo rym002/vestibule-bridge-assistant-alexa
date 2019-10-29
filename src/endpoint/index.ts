@@ -65,9 +65,9 @@ export interface AlexaEndpointEmitter extends EndpointEmitter<'alexa'> {
     removeListener(event: 'settings', listener: (data: EndpointSettings) => void): this
 }
 
-type EndpointSettings = 
+type EndpointSettings =
     EndpointCapability
-    & Partial<Pick<EndpointInfo,Exclude<keyof EndpointInfo,'endpointId'>>>
+    & Partial<Pick<EndpointInfo, Exclude<keyof EndpointInfo, 'endpointId'>>>
 class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpointEmitter {
     readonly alexaStateEmitter: AlexaStateEmitter = new EventEmitter();
     readonly alexaDirectiveEmitter: AlexaDirectiveEmitter = new EventEmitter();
@@ -94,7 +94,10 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
             transPromises = [];
             this.deltaPromises.set(deltaId, transPromises);
         }
-        transPromises.push(promise);
+        transPromises.push(promise
+            .catch((err) => {
+                console.log(err)
+            }));
     }
     private getDeltaEndpoint(deltaId: symbol) {
         let deltaEndpoint = this.deltaEndpointsState.get(deltaId);
@@ -104,7 +107,7 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
         }
         return deltaEndpoint;
     }
-    private getDeltaSettings(deltaId:symbol){
+    private getDeltaSettings(deltaId: symbol) {
         let deltaEndpoint = this.deltaEndpointSettings.get(deltaId);
         if (!deltaEndpoint) {
             deltaEndpoint = {
@@ -118,7 +121,7 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
         _.merge(this.getDeltaSettings(deltaId), data);
     }
     private updateCapability<NS extends keyof EndpointCapability>(namespace: NS, value: SubType<EndpointCapability, NS>, deltaId: symbol) {
-        this.getDeltaSettings(deltaId)[namespace]=value;
+        this.getDeltaSettings(deltaId)[namespace] = value;
     }
     private updateState<NS extends keyof EndpointState, N extends keyof EndpointState[NS]>(namespace: NS, name: N, value: SubType<SubType<EndpointState, NS>, N>, deltaId: symbol) {
         this.mergeState(namespace, name, value, this.endpoint);
@@ -141,7 +144,7 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
         await this.completeDeltaSettings(deltaId);
     }
 
-    private async waitDeltaPromises(deltaId:symbol){
+    private async waitDeltaPromises(deltaId: symbol) {
         const promises = this.deltaPromises.get(deltaId);
         if (promises) {
             await Promise.all(promises);
