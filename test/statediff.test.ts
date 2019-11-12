@@ -130,16 +130,7 @@ describe('statediff', () => {
         }
         const delta = stateDiff(o1, o2);
         expect(delta)
-            .to.have.property('s1')
             .to.be.undefined
-        expect(delta)
-            .to.not.have.property('b1')
-        expect(delta)
-            .to.not.have.property('n1')
-        expect(delta)
-            .to.not.have.property('a1')
-        expect(delta)
-            .to.not.have.property('o1')
     })
     it('should return null', () => {
         const o2 = {
@@ -198,13 +189,12 @@ describe('statediff', () => {
             .to.have.property('o1')
             .to.be.null
     })
-    it('should return undefined nested object', () => {
+    it('should return undefined nested object if nested object is undefined', () => {
         const o2 = {
             'o1': undefined,
         }
         const delta = stateDiff(o1, o2);
         expect(delta)
-            .to.have.property('o1')
             .to.be.undefined
     })
 })

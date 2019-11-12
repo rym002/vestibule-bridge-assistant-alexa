@@ -17,7 +17,7 @@ function stateDiff<P extends Array<any> | Object, N extends Array<any> | Object>
                         }
                     }
                 } else {
-                    if (newValue !== prevValue) {
+                    if (newValue !== undefined && newValue !== prevValue) {
                         ret[key] = newValue;
                     }
                 }
