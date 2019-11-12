@@ -170,8 +170,8 @@ describe('statediff', () => {
         expect(delta)
             .to.have.property('o1')
             .to.eql({
-                    's11': 'newvalue'
-                })
+                's11': 'newvalue'
+            })
         expect(delta)
             .to.not.have.property('b1')
         expect(delta)

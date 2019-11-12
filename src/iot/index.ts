@@ -1,7 +1,7 @@
 import { providersEmitter, responseRouter, topicHandler } from '@vestibule-link/bridge-assistant';
 import { AssistantType, Providers, Shadow, toLocalEndpoint, generateTopic } from '@vestibule-link/iot-types';
 import { thingShadow } from 'aws-iot-device-sdk';
-import * as _ from 'lodash';
+import { merge, isEmpty } from 'lodash';
 import { routeStateDelta } from '../state';
 import stateDiff from '../state/statediff';
 import { alexaConfig, createShadow, settingsTopic } from './shadow';
@@ -18,11 +18,11 @@ class AlexaRouter {
             .on('status', this.statusUpdate.bind(this))
             .on('delta', routeStateDelta);
         providersEmitter.on(this.assistant, this.providers.bind(this));
-        providersEmitter.getEndpointSettingsEmitter('alexa').on('settings',this.sendEndpointSettings.bind(this));
+        providersEmitter.getEndpointSettingsEmitter('alexa').on('settings', this.sendEndpointSettings.bind(this));
         responseRouter.on(this.assistant, this.sendResponse.bind(this));
     }
-    private sendEndpointSettings(endpointId:string,data:any){
-        this.thingShadow.publish(settingsTopic + generateTopic(toLocalEndpoint(endpointId)),JSON.stringify(data))
+    private sendEndpointSettings(endpointId: string, data: any) {
+        this.thingShadow.publish(settingsTopic + generateTopic(toLocalEndpoint(endpointId)), JSON.stringify(data))
     }
     sendStateUpdate(shadow: Shadow): Promise<void> {
         const promise = new Promise<void>((resolve, reject) => {
@@ -55,15 +55,17 @@ class AlexaRouter {
     }
 
     providers(providers: Providers<'alexa'>): void {
-        this.sendStateUpdate({
-            state: {
-                reported: {
-                    endpoints: providers
+        if (!isEmpty(providers)) {
+            this.sendStateUpdate({
+                state: {
+                    reported: {
+                        endpoints: providers
+                    }
                 }
-            }
-        }).catch(err => {
-            console.log('Error Updating providers %o', err);
-        })
+            }).catch(err => {
+                console.log('Error Updating providers %o', err);
+            })
+        }
     }
 
     statusUpdate(th: string, operation: string, token: string, stateObject: any) {
@@ -71,7 +73,7 @@ class AlexaRouter {
         if (holder) {
             this.shadowUpdates.delete(token);
             if (operation == 'accepted') {
-                _.merge(this.remoteShadow, stateObject);
+                merge(this.remoteShadow, stateObject);
                 holder.resolve();
             } else {
                 holder.reject(stateObject);

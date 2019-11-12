@@ -16,7 +16,7 @@
     "type": "git"
   },
   "dependencies": {
-    "@vestibule-link/alexa-video-skill-types": "^1.1.1",
+    "@vestibule-link/alexa-video-skill-types": "^1.1.12",
     "aws-iot-device-sdk": "^2.2.1",
     "lodash": "^4.17.15"
   },
@@ -26,17 +26,17 @@
   "devDependencies": {
     "@types/aws-iot-device-sdk": "^2.2.0",
     "@types/chai": "^4.2.4",
-    "@types/lodash": "^4.14.144",
+    "@types/lodash": "^4.14.146",
     "@types/mocha": "^5.2.7",
-    "@types/node": "^12.11.7",
+    "@types/node": "^12.12.7",
     "@types/sinon": "^7.5.0",
     "@vestibule-link/bridge": "^1.1.2",
     "@vestibule-link/bridge-assistant": "^1.0.10",
-    "@vestibule-link/iot-types": "^2.0.2",
+    "@vestibule-link/iot-types": "^2.0.3",
     "chai": "^4.2.0",
     "mocha": "^6.2.2",
     "sinon": "^7.5.0",
-    "ts-node": "^8.4.1",
-    "typescript": "^3.6.4"
+    "ts-node": "^8.5.0",
+    "typescript": "^3.7.2"
   }
 }
