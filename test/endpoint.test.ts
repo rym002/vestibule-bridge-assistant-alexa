@@ -58,22 +58,22 @@ describe('endpoint', () => {
         }, true)
         const deltaId = Symbol()
         const emitStub = sandbox.stub(providersEmitter, 'emit');
-        endpointEmitter.emit('state', 'Alexa.PlaybackStateReporter', 'playbackState', 'PLAYING', deltaId);
+        endpointEmitter.emit('state', 'Alexa.PlaybackStateReporter', 'playbackState', { state: 'PLAYING' }, deltaId);
         await endpointEmitter.completeDeltaState(deltaId);
         assert(emitStub.called)
     })
 
-    it('should emit settings',async ()=>{
+    it('should emit settings', async () => {
         const endpointEmitter = <AlexaEndpointEmitter>providersEmitter.getEndpointEmitter('alexa', {
             provider: 'testProvider',
             host: 'testSettings'
         }, true)
         const deltaId = Symbol()
         const emitStub = sandbox.stub(providersEmitter.getEndpointSettingsEmitter('alexa'), 'emit');
-        endpointEmitter.emit('capability','Alexa.ChannelController',['channel'], deltaId);
+        endpointEmitter.emit('capability', 'Alexa.ChannelController', ['channel'], deltaId);
         await endpointEmitter.completeDeltaSettings(deltaId);
-        assert(emitStub.calledOnceWith('settings','testProvider@testSettings',{
-            'Alexa.ChannelController':['channel']
+        assert(emitStub.calledOnceWith('settings', 'testProvider@testSettings', {
+            'Alexa.ChannelController': ['channel']
         }))
 
     })
@@ -125,7 +125,7 @@ describe('endpoint', () => {
             endpointEmitter.registerDirectiveHandler('Alexa.SeekController', directiveHandler);
             endpointEmitter.emit('directive', ['Alexa.PlaybackController', 'Play'], {}, messageId)
         })
-        it('should send error for unsupported operation',(done)=>{
+        it('should send error for unsupported operation', (done) => {
             const endpointEmitter = <AlexaEndpointEmitter>providersEmitter.getEndpointEmitter('alexa', {
                 provider: 'testProvider',
                 host: 'testDirectiveOperation'

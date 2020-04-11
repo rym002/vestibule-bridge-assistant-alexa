@@ -8,7 +8,7 @@ const StateInterfaceName: StateInterface = PlaybackStateReporter.namespace
 class StateHandler implements SubType<EndpointStateHandlers, StateInterface>{
     async handleState(dh: DirectiveHandlers, desiredState: EndpointState[StateInterface]) {
         const handler = dh[StateInterfaceName]
-        switch (desiredState.playbackState) {
+        switch (desiredState.playbackState.state) {
             case 'PLAYING':
                 await handler.Play({});
                 break;
