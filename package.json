@@ -1,6 +1,6 @@
 {
   "name": "@vestibule-link/bridge-assistant-alexa",
-  "version": "1.0.17",
+  "version": "1.0.18",
   "description": "",
   "main": "dist/index.js",
   "scripts": {
