@@ -1,49 +1,55 @@
-import { DeltaShadow, EndpointState, ErrorHolder, toLocalEndpoint } from "@vestibule-link/iot-types";
+import { Directive } from "@vestibule-link/alexa-video-skill-types";
+import { EndpointState, ErrorHolder, SubType } from "@vestibule-link/iot-types";
+import { map } from 'lodash';
 import { DirectiveHandlers } from "../directive";
 import channelController from './ChannelController';
 import playbackStateReporter from './PlaybackStateReporter';
 import powerController from './PowerController';
 import recordController from './RecordController';
-import { providersEmitter } from "@vestibule-link/bridge-assistant";
-import * as _ from 'lodash';
-import { AlexaEndpointEmitter } from "endpoint";
 
-export type EndpointStateHandlers = Partial<{
-    [NS in keyof EndpointState]: {
-        'handleState': (dh: DirectiveHandlers, desiredState: EndpointState[NS]) => Promise<void>
-    }
-}>
 
-const stateHandlers: EndpointStateHandlers = {};
-stateHandlers['Alexa.ChannelController'] = channelController;
-stateHandlers['Alexa.PlaybackStateReporter'] = playbackStateReporter;
-stateHandlers['Alexa.PowerController'] = powerController;
-stateHandlers['Alexa.RecordController'] = recordController;
 
-export function routeStateDelta(thingName: string, shadowObject: DeltaShadow): void {
-    const endpoints = shadowObject.state.endpoints;
-    _.map(endpoints, (endpoint, endpointId) => {
-        const endpointEmitter = <AlexaEndpointEmitter>providersEmitter.getEndpointEmitter('alexa', toLocalEndpoint(endpointId));
-        _.map(endpoint, (desiredState, stateId) => {
-            const stateHandler = stateHandlers[stateId];
-            if (!stateHandler) {
+export interface EndpointStateHandler<DT extends Directive.Namespaces, ST extends keyof EndpointState> {
+    readonly directiveName: DT
+    handleState: (handler: SubType<DirectiveHandlers, DT>, desiredState: EndpointState[ST]) => Promise<void>
+}
+
+type EndpointStateHandlers = {
+    [NS in keyof EndpointState]: EndpointStateHandler<any, NS>
+}
+const stateHandlers: EndpointStateHandlers = {
+    'Alexa.ChannelController': channelController,
+    'Alexa.PlaybackStateReporter': playbackStateReporter,
+    'Alexa.PowerController': powerController,
+    'Alexa.RecordController': recordController
+}
+export async function routeStateDelta(endpointDesiredState: EndpointState, directiveHandlers: DirectiveHandlers): Promise<void> {
+    const promises = map(endpointDesiredState, async (desiredState, stateId: keyof EndpointState) => {
+        const stateHandler = stateHandlers[stateId];
+        if (stateHandler) {
+            const directiveHandler = directiveHandlers[stateHandler.directiveName]
+            if (directiveHandler) {
+                await stateHandler.handleState(directiveHandler, desiredState)
+            } else {
                 const error: ErrorHolder = {
                     errorType: 'Alexa',
                     errorPayload: {
-                        type: 'INVALID_DIRECTIVE',
-                        message: 'State Handler Not Found'
+                        type: 'NOT_SUPPORTED_IN_CURRENT_MODE',
+                        message: `Directive Handler Not found: ${stateHandler.directiveName}`
                     }
                 }
                 throw error
             }
-
-            const dhs = endpointEmitter.directiveHandlers;
-            stateHandler.handleState(dhs, desiredState)
-                .catch(err => {
-                    //TODO handle error
-                    console.log('routeStateDelta %o', err);
-                });
-
-        })
+        } else {
+            const error: ErrorHolder = {
+                errorType: 'Alexa',
+                errorPayload: {
+                    type: 'INVALID_DIRECTIVE',
+                    message: 'State Handler Not Found'
+                }
+            }
+            throw error
+        }
     })
+    await Promise.all(promises)
 }

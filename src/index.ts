@@ -1,7 +1,6 @@
 import { registerModule } from '@vestibule-link/bridge';
 import { startModule as assistantStartModule } from '@vestibule-link/bridge-assistant';
 import { registerAssistant } from './endpoint';
-import { init } from './iot';
 
 export { DirectiveHandlers, SupportedDirectives } from './directive';
 export { AlexaDirectiveEmitter, AlexaEndpointEmitter, AlexaStateEmitter, CapabilityEmitter, InfoEmitter, StateEmitter } from './endpoint';
@@ -13,8 +12,7 @@ export function startModule() {
         moduleId = registerModule({
             name: 'assistant-alexa',
             init: async () => {
-                registerAssistant();
-                await init();
+                await registerAssistant();
             },
             depends:[assistantStartModule()]
         })

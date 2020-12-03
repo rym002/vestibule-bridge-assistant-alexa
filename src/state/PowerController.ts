@@ -1,13 +1,12 @@
-import { EndpointStateHandlers } from ".";
-import { SubType, EndpointState } from "@vestibule-link/iot-types";
-import { DirectiveHandlers } from "../directive";
 import { PowerController } from "@vestibule-link/alexa-video-skill-types";
+import { EndpointState } from "@vestibule-link/iot-types";
+import { EndpointStateHandler } from ".";
+import { DirectiveHandlers } from "../directive";
 
 type StateInterface = PowerController.NamespaceType
-const StateInterfaceName: StateInterface = PowerController.namespace
-class StateHandler implements SubType<EndpointStateHandlers, StateInterface>{
-    async handleState(dh: DirectiveHandlers, desiredState: EndpointState[StateInterface]) {
-        const handler = dh[StateInterfaceName]
+class StateHandler implements EndpointStateHandler<StateInterface, StateInterface>{
+    readonly directiveName = PowerController.namespace
+    async handleState(handler: DirectiveHandlers[StateInterface], desiredState: EndpointState[StateInterface]) {
         switch (desiredState.powerState) {
             case 'OFF':
                 await handler.TurnOff({});

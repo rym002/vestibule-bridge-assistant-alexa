@@ -1,109 +1,34 @@
-import { providersEmitter, responseRouter, topicHandler } from '@vestibule-link/bridge-assistant';
-import { AssistantType, Providers, Shadow, toLocalEndpoint, generateTopic } from '@vestibule-link/iot-types';
-import { thingShadow } from 'aws-iot-device-sdk';
-import { merge, isEmpty } from 'lodash';
-import { routeStateDelta } from '../state';
-import stateDiff from '../state/statediff';
-import { alexaConfig, createShadow, settingsTopic } from './shadow';
+import { io, iot, mqtt } from "aws-iot-device-sdk-v2";
 
 
-class AlexaRouter {
-    readonly assistant: AssistantType = "alexa";
-    remoteShadow: Shadow = {};
-    lastClientToken: string | undefined;
-    pendingUpdates: ShadowUpdateHolder[] = [];
-    shadowUpdates: Map<string, PromiseHolder> = new Map();
-    constructor(readonly thingShadow: thingShadow) {
-        thingShadow.on('message', topicHandler)
-            .on('status', this.statusUpdate.bind(this))
-            .on('delta', routeStateDelta);
-        providersEmitter.on(this.assistant, this.providers.bind(this));
-        providersEmitter.getEndpointSettingsEmitter('alexa').on('settings', this.sendEndpointSettings.bind(this));
-        responseRouter.on(this.assistant, this.sendResponse.bind(this));
-    }
-    private sendEndpointSettings(endpointId: string, data: any) {
-        this.thingShadow.publish(settingsTopic + generateTopic(toLocalEndpoint(endpointId)), JSON.stringify(data))
-    }
-    sendStateUpdate(shadow: Shadow): Promise<void> {
-        const promise = new Promise<void>((resolve, reject) => {
-            if (this.lastClientToken) {
-                this.pendingUpdates.push({
-                    reject: reject,
-                    resolve: resolve,
-                    shadow: shadow
-                });
-            } else {
-                shadow = stateDiff(this.remoteShadow, shadow);
-                if (shadow) {
-                    shadow.state = { ...shadow.state, ...{ desired: null } };
-                    this.lastClientToken = this.thingShadow.update(alexaConfig.clientId, shadow);
-                    this.shadowUpdates.set(this.lastClientToken, { reject: reject, resolve: resolve });
-                } else {
-                    resolve();
-                }
-            }
-        })
-        return promise;
+export function alexaConfig() {
+    return {
+        certPath: process.env['CERT_PATH'],
+        clientId: process.env['CLIENT_ID'],
+        host: process.env['VESTIBULE_HOST']
     }
 
-    sendResponse(topic: string, resp: string): void {
-        this.thingShadow.publish(topic, resp);
-    }
-
-    disconnect(): void {
-        this.thingShadow.end();
-    }
-
-    providers(providers: Providers<'alexa'>): void {
-        if (!isEmpty(providers)) {
-            this.sendStateUpdate({
-                state: {
-                    reported: {
-                        endpoints: providers
-                    }
-                }
-            }).catch(err => {
-                console.log('Error Updating providers %o', err);
-            })
-        }
-    }
-
-    statusUpdate(th: string, operation: string, token: string, stateObject: any) {
-        const holder = this.shadowUpdates.get(token);
-        if (holder) {
-            this.shadowUpdates.delete(token);
-            if (operation == 'accepted') {
-                merge(this.remoteShadow, stateObject);
-                holder.resolve();
-            } else {
-                holder.reject(stateObject);
-            }
-        }
-        if (token == this.lastClientToken) {
-            this.lastClientToken = undefined;
-        }
-        if (this.pendingUpdates.length > 0) {
-            const nextUpdate = this.pendingUpdates.shift();
-            this.sendStateUpdate(nextUpdate.shadow)
-                .then(() => {
-                    nextUpdate.resolve();
-                }).catch(err => {
-                    nextUpdate.reject(err);
-                });
-        }
-    }
 }
 
-interface PromiseHolder {
-    resolve: CallableFunction;
-    reject: CallableFunction;
-}
-interface ShadowUpdateHolder extends PromiseHolder {
-    shadow: Shadow
-}
+export async function createConnection(): Promise<mqtt.MqttClientConnection> {
+    const bootstrap = new io.ClientBootstrap()
 
-let router: AlexaRouter;
-export async function init(): Promise<void> {
-    const shadow = await createShadow();
-    router = new AlexaRouter(shadow);
+    const client = new mqtt.MqttClient(bootstrap)
+    const appConfig = alexaConfig()
+    const config = iot.AwsIotMqttConnectionConfigBuilder
+        .new_mtls_builder_from_path(appConfig.certPath + '/vestibule.cert.pem', appConfig.certPath + '/vestibule.private.key')
+        .with_certificate_authority(appConfig.certPath + '/AmazonRootCA1.pem')
+        .with_client_id(appConfig.clientId)
+        .with_endpoint(appConfig.host)
+        .build()
+
+    const connection = client.new_connection(config)
+
+    const connected = await connection.connect()
+
+    if (!connected) {
+        throw new Error("Connection failed")
+    }
+
+    return connection;
 }

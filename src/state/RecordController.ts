@@ -1,13 +1,12 @@
-import { EndpointStateHandlers } from ".";
-import { SubType, EndpointState } from "@vestibule-link/iot-types";
-import { DirectiveHandlers } from "../directive";
 import { RecordController } from "@vestibule-link/alexa-video-skill-types";
+import { EndpointState } from "@vestibule-link/iot-types";
+import { EndpointStateHandler } from ".";
+import { DirectiveHandlers } from "../directive";
 
 type StateInterface = RecordController.NamespaceType
-const StateInterfaceName: StateInterface = RecordController.namespace
-class StateHandler implements SubType<EndpointStateHandlers, StateInterface>{
-    async handleState(dh: DirectiveHandlers, desiredState: EndpointState[StateInterface]) {
-        const handler = dh[StateInterfaceName]
+class StateHandler implements EndpointStateHandler<StateInterface, StateInterface>{
+    directiveName = RecordController.namespace
+    async handleState(handler: DirectiveHandlers[StateInterface], desiredState: EndpointState[StateInterface]) {
         switch (desiredState.RecordingState) {
             case 'NOT_RECORDING':
                 await handler.StopRecording({});

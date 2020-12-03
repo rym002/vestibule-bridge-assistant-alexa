@@ -1,13 +1,13 @@
-import { EndpointStateHandlers } from ".";
-import { SubType, EndpointState } from "@vestibule-link/iot-types";
+import { PlaybackController, PlaybackStateReporter } from "@vestibule-link/alexa-video-skill-types";
+import { EndpointState } from "@vestibule-link/iot-types";
+import { EndpointStateHandler } from ".";
 import { DirectiveHandlers } from "../directive";
-import { PlaybackStateReporter } from "@vestibule-link/alexa-video-skill-types";
 
 type StateInterface = PlaybackStateReporter.NamespaceType
-const StateInterfaceName: StateInterface = PlaybackStateReporter.namespace
-class StateHandler implements SubType<EndpointStateHandlers, StateInterface>{
-    async handleState(dh: DirectiveHandlers, desiredState: EndpointState[StateInterface]) {
-        const handler = dh[StateInterfaceName]
+type DirectiveInterface = PlaybackController.NamespaceType
+class StateHandler implements EndpointStateHandler<DirectiveInterface, StateInterface>{
+    readonly directiveName = PlaybackController.namespace
+    async handleState(handler: DirectiveHandlers[DirectiveInterface], desiredState: EndpointState[StateInterface]) {
         switch (desiredState.playbackState.state) {
             case 'PLAYING':
                 await handler.Play({});
