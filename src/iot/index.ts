@@ -31,7 +31,10 @@ export async function createConnection(): Promise<mqtt.MqttClientConnection> {
 
     const connection = client.new_connection(config)
 
+    //Timer is needed or else connect hangs and does not return
+    const timer = setTimeout(() => { }, 60 * 1000);
     const connected = await connection.connect()
+    clearTimeout(timer)
 
     if (!connected) {
         throw new Error("Connection failed")
