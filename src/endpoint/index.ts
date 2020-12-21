@@ -280,6 +280,7 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
         }
         const deltaId = Symbol()
         this.emit('refreshState', deltaId)
+        this.completeDeltaState(deltaId)
     }
     private shadowErrorHandler(error?: iotshadow.IotShadowError, response?: iotshadow.model.ErrorResponse) {
         this.handleShadowError('Shadow Error', error)
