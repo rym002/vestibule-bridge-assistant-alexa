@@ -72,7 +72,6 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
     readonly alexaStateEmitter: AlexaStateEmitter = new EventEmitter();
     readonly alexaDirectiveEmitter: AlexaDirectiveEmitter = new EventEmitter();
     readonly endpoint: AlexaEndpoint = {};
-    private remoteState: AlexaEndpoint = {};
     private readonly deltaPromises = new Map<symbol, Promise<void>[]>();
     private readonly deltaEndpointsState = new Map<symbol, AlexaEndpoint>();
     private readonly deltaEndpointSettings = new Map<symbol, EndpointSettings>();
@@ -117,27 +116,24 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
         const directive = await this.mqttConnection.subscribe(directiveTopic, mqtt.QoS.AtLeastOnce, this.directiveHandler.bind(this))
         this.verifyMqttSubscription(directive)
 
+        const deleteAccepted = await this.shadowClient.subscribeToDeleteNamedShadowAccepted(this.namedShadowRequest,
+            mqtt.QoS.AtLeastOnce,
+            this.shadowDeleteAcceptedHandler.bind(this))
+        this.verifyMqttSubscription(deleteAccepted)
+
+        const shadowDeleteError = await this.shadowClient.subscribeToDeleteNamedShadowRejected(this.namedShadowRequest,
+            mqtt.QoS.AtLeastOnce, this.shadowErrorHandler.bind(this))
+        this.verifyMqttSubscription(shadowDeleteError)
+
+        const deleteShadow = await this.shadowClient.publishDeleteNamedShadow(this.namedShadowRequest, mqtt.QoS.AtLeastOnce)
+
         const shadowDelta = await this.shadowClient.subscribeToNamedShadowDeltaUpdatedEvents(this.namedShadowRequest,
             mqtt.QoS.AtLeastOnce, this.shadowDeltaHandler.bind(this))
         this.verifyMqttSubscription(shadowDelta)
 
-        const shadowUpdate = await this.shadowClient.subscribeToNamedShadowUpdatedEvents(this.namedShadowRequest,
-            mqtt.QoS.AtLeastOnce, this.shadowUpdateHandler.bind(this))
-        this.verifyMqttSubscription(shadowUpdate)
-
-        const shadowGet = await this.shadowClient.subscribeToGetNamedShadowAccepted(this.namedShadowRequest,
-            mqtt.QoS.AtLeastOnce, this.shadowGetHandler.bind(this))
-        this.verifyMqttSubscription(shadowGet)
-
-        const shadowGetError = await this.shadowClient.subscribeToGetNamedShadowRejected(this.namedShadowRequest,
-            mqtt.QoS.AtLeastOnce, this.shadowErrorHandler.bind(this))
-        this.verifyMqttSubscription(shadowGetError)
-
         const shadowUpdateError = await this.shadowClient.subscribeToUpdateNamedShadowRejected(this.namedShadowRequest,
             mqtt.QoS.AtLeastOnce, this.shadowErrorHandler.bind(this))
         this.verifyMqttSubscription(shadowUpdateError)
-
-        const shadowGetRequest = await this.shadowClient.publishGetNamedShadow(this.namedShadowRequest, mqtt.QoS.AtLeastOnce)
     }
 
     registerDirectiveHandler<NS extends keyof DirectiveHandlers>(namespace: NS, directiveHandler: SubType<DirectiveHandlers, NS>): void {
@@ -267,7 +263,7 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
             try {
                 await routeStateDelta(response.state, this.directiveHandlers)
             } catch (err) {
-                console.log("error %o", err)
+                console.log("%s error: %o response: %o", this.endpointId, err, response)
             }
         }
     }
@@ -277,26 +273,18 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
             console.log("%s error %o", errorType, error)
         }
     }
-    private shadowUpdateHandler(error?: iotshadow.IotShadowError, response?: iotshadow.model.ShadowUpdatedEvent) {
-        this.handleShadowError('Update', error)
+    private shadowDeleteAcceptedHandler(error?: iotshadow.IotShadowError, response?: iotshadow.model.DeleteShadowResponse) {
+        this.handleShadowError('Delete', error)
         if (response) {
-            this.remoteState = response.current.state.reported
+            console.info("%s shadow deleted", this.endpointId)
         }
-    }
-    private async shadowGetHandler(error?: iotshadow.IotShadowError, response?: iotshadow.model.GetShadowResponse) {
-        this.handleShadowError('Get', error)
-        if (response) {
-            this.remoteState = response.state.reported
-
-            if (response.state.desired) {
-                await routeStateDelta(response.state.desired, this.directiveHandlers)
-            }
-        }
+        const deltaId = Symbol()
+        this.emit('refreshState', deltaId)
     }
     private shadowErrorHandler(error?: iotshadow.IotShadowError, response?: iotshadow.model.ErrorResponse) {
         this.handleShadowError('Shadow Error', error)
         if (response) {
-            console.error('Shadow error %o', response)
+            console.error('%s Shadow error %o', this.endpointId, response)
         }
     }
 
