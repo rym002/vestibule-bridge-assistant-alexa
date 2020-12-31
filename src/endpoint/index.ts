@@ -3,7 +3,7 @@ import { DirectiveHandlers, DirectiveRequest } from '../directive';
 import { EventEmitter } from 'events';
 import { merge } from 'lodash';
 import { routeStateDelta } from '../state';
-import { IotShadowEndpoint, awsConnection } from '@vestibule-link/bridge-gateway-aws';
+import { IotShadowEndpoint, awsConnection, AbstractIotShadowEndpoint } from '@vestibule-link/bridge-gateway-aws';
 import { mqtt } from 'aws-iot-device-sdk-v2';
 import { serviceProviderManager, ServiceProviderEndpointFactory } from '@vestibule-link/bridge-service-provider'
 
@@ -47,7 +47,7 @@ export interface AlexaStateEmitter {
 /**
  * Endpoint connector for alexa using aws iot
  */
-export interface AlexaEndpointConnector extends IotShadowEndpoint<EndpointState>, StateEmitter, InfoEmitter, CapabilityEmitter {
+export interface AlexaEndpointConnector extends IotShadowEndpoint, StateEmitter, InfoEmitter, CapabilityEmitter {
     /**
      * DirectiveHandlers supported by this endpoint
      */
@@ -101,7 +101,7 @@ export interface AlexaEndpointConnector extends IotShadowEndpoint<EndpointState>
 type EndpointSettings =
     EndpointCapability
     & Partial<Pick<EndpointInfo, Exclude<keyof EndpointInfo, 'endpointId'>>>
-class AlexaEndpointConnectorImpl extends IotShadowEndpoint<EndpointState> implements AlexaEndpointConnector {
+class AlexaEndpointConnectorImpl extends AbstractIotShadowEndpoint<EndpointState> implements AlexaEndpointConnector {
     readonly alexaStateEmitter: AlexaStateEmitter = new EventEmitter();
     readonly endpoint: AlexaEndpoint = {};
     private readonly deltaEndpointsState = new Map<symbol, AlexaEndpoint>();

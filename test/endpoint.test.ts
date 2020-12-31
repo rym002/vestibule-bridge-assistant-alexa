@@ -7,6 +7,7 @@ import 'mocha';
 import { createSandbox, match, SinonSandbox, SinonStub, SinonStubbedInstance, SinonStubbedMember, StubbableType } from 'sinon';
 import { DirectiveHandlers, SupportedDirectives } from '../src/directive';
 import { AlexaEndpointConnector, registerAssistant } from '../src/endpoint';
+import { EventEmitter } from 'events';
 
 
 type StatelessPayload<T> = {
@@ -85,7 +86,7 @@ describe('endpoint', () => {
         const sandbox = getContextSandbox(this)
         const endpointConnector = await serviceProviderManager.getEndpointConnector('alexa', 'testProvider_testRefresh', true)
         const deltaId = Symbol()
-        const emitStub = <SinonStub<any, boolean>>sandbox.stub(endpointConnector, 'emit');
+        const emitStub = <SinonStub<any, boolean>>sandbox.stub(<EventEmitter><unknown>endpointConnector, 'emit');
         endpointConnector.refresh(deltaId);
         sandbox.assert.calledWith(emitStub, 'refreshState', deltaId)
         sandbox.assert.calledWith(emitStub, 'refreshCapability', deltaId)
