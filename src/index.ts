@@ -1,9 +1,10 @@
 import { registerModule } from '@vestibule-link/bridge';
-import { startModule as assistantStartModule } from '@vestibule-link/bridge-assistant';
+import { startModule as serviceProviderStartModule } from '@vestibule-link/bridge-service-provider';
+import { startModule as awsGatewayStartModule } from '@vestibule-link/bridge-gateway-aws';
 import { registerAssistant } from './endpoint';
 
 export { DirectiveHandlers, SupportedDirectives } from './directive';
-export { AlexaDirectiveEmitter, AlexaEndpointEmitter, AlexaStateEmitter, CapabilityEmitter, InfoEmitter, StateEmitter } from './endpoint';
+export { AlexaEndpointConnector, AlexaStateEmitter, CapabilityEmitter, InfoEmitter, StateEmitter } from './endpoint';
 
 let moduleId: symbol | undefined;
 
@@ -14,7 +15,8 @@ export function startModule() {
             init: async () => {
                 await registerAssistant();
             },
-            depends:[assistantStartModule()]
+            depends: [serviceProviderStartModule(),
+            awsGatewayStartModule()]
         })
     }
     return moduleId;

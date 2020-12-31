@@ -1,22 +1,42 @@
 import { AlexaEndpoint, EndpointState, SubType, EndpointInfo, EndpointCapability, ErrorHolder, ResponseMessage, endpointTopicPrefix, RequestMessage } from '@vestibule-link/iot-types';
 import { DirectiveHandlers, DirectiveRequest } from '../directive';
-import { EndpointEmitter, providersEmitter, Assistant } from '@vestibule-link/bridge-assistant';
 import { EventEmitter } from 'events';
 import { merge } from 'lodash';
-import { iotshadow, mqtt } from 'aws-iot-device-sdk-v2';
-import { alexaConfig, createConnection } from '../iot';
 import { routeStateDelta } from '../state';
+import { IotShadowEndpoint, awsConnection } from '@vestibule-link/bridge-gateway-aws';
+import { mqtt } from 'aws-iot-device-sdk-v2';
+import { serviceProviderManager, ServiceProviderEndpointFactory } from '@vestibule-link/bridge-service-provider'
 
+declare module '@vestibule-link/bridge-service-provider/dist/providers' {
+    export interface ServiceProviderConnectors {
+        alexa: AlexaEndpointConnector
+    }
+}
+/**
+ * Implement to support refresh State.
+ * Listen for refrehState event
+ */
 export interface StateEmitter {
     refreshState(deltaId: symbol): void;
 }
+/**
+ * Implement to support refresh Capability.
+ * Listen for refreshCapability event
+ */
 export interface CapabilityEmitter {
     refreshCapability(deltaId: symbol): void;
 }
+/**
+ * Implement to support refresh Info.
+ * Listen for refreshInfo event
+ */
 export interface InfoEmitter {
     refreshInfo(deltaId: symbol): void;
 }
 
+/**
+ * Emits state change events
+ */
 export interface AlexaStateEmitter {
     emit<NS extends keyof EndpointState, N extends keyof EndpointState[NS]>(event: NS, name: N, value: SubType<SubType<EndpointState, NS>, N>): boolean
     on<NS extends keyof EndpointState, N extends keyof EndpointState[NS]>(event: NS, listener: (name: N, value: SubType<SubType<EndpointState, NS>, N>) => void): this
@@ -24,131 +44,107 @@ export interface AlexaStateEmitter {
     removeListener<NS extends keyof EndpointState, N extends keyof EndpointState[NS]>(event: NS, listener: (name: N, value: SubType<SubType<EndpointState, NS>, N>) => void): this
 }
 
-export interface AlexaDirectiveEmitter {
-    emit<NS extends keyof DirectiveHandlers, N extends keyof DirectiveHandlers[NS]>(event: NS, name: N, request: SubType<SubType<DirectiveHandlers, NS>, N>): boolean
-    on<NS extends keyof DirectiveHandlers, N extends keyof DirectiveHandlers[NS]>(event: NS, listener: (name: N, request: SubType<SubType<DirectiveHandlers, NS>, N>) => void): this
-    listenerCount<NS extends keyof DirectiveRequest>(type: NS): number;
-}
-
-export interface AlexaEndpointEmitter extends EndpointEmitter<'alexa'> {
-    alexaStateEmitter: AlexaStateEmitter;
-    readonly endpoint: AlexaEndpoint;
+/**
+ * Endpoint connector for alexa using aws iot
+ */
+export interface AlexaEndpointConnector extends IotShadowEndpoint<EndpointState>, StateEmitter, InfoEmitter, CapabilityEmitter {
+    /**
+     * DirectiveHandlers supported by this endpoint
+     */
     readonly directiveHandlers: DirectiveHandlers
-    subscribeMessages(): Promise<void>
+    /**
+     * State emitter 
+     */
+    alexaStateEmitter: AlexaStateEmitter
+    /**
+     * Registers a directive handler for this endpoint
+     * Automatically attaches the any listeners for refresh events
+     * @param namespace directive namespace
+     * @param directiveHandler directive handler for namespace
+     */
     registerDirectiveHandler<NS extends keyof DirectiveHandlers>(namespace: NS, directiveHandler: SubType<DirectiveHandlers, NS>): void;
+    /**
+     * Indicates all changes have been sent.
+     * Connector should update the shadow with the changes based on deltaId
+     * @param deltaId change id
+     */
     completeDeltaState(deltaId: symbol): Promise<void>;
+    /**
+     * Indicates all changes have been sent
+     * Connector should update the endpoint settings based on deltaId
+     * @param deltaId change id
+     */
     completeDeltaSettings(deltaId: symbol): Promise<void>;
-    watchDeltaUpdate(promise: Promise<void>, deltaId: symbol): void;
-    emit(event: 'refreshState' | 'refreshCapability' | 'refreshInfo', deltaId: symbol): boolean;
-    on(event: 'refreshState' | 'refreshCapability' | 'refreshInfo', listener: (deltaId: symbol) => void): this;
-    once(event: 'refreshState' | 'refreshCapability' | 'refreshInfo', listener: (deltaId: symbol) => void): this;
-    removeListener(event: 'refreshState' | 'refreshCapability' | 'refreshInfo', listener: (deltaId: symbol) => void): this;
-    emit(event: 'delta', data: AlexaEndpoint, deltaId: symbol): boolean;
-    on(event: 'delta', listener: (data: AlexaEndpoint, deltaId: symbol) => void): this;
-    once(event: 'delta', listener: (data: AlexaEndpoint, deltaId: symbol) => void): this;
-    removeListener(event: 'delta', listener: (data: AlexaEndpoint, deltaId: symbol) => void): this;
-    emit(event: 'info', data: EndpointInfo, deltaId: symbol): boolean;
-    on(event: 'info', listener: (data: EndpointInfo, deltaId: symbol) => void): this;
-    once(event: 'info', listener: (data: EndpointInfo, deltaId: symbol) => void): this;
-    removeListener(event: 'info', listener: (data: EndpointInfo, deltaId: symbol) => void): this;
-    emit<NS extends keyof EndpointCapability>(event: 'capability', namespace: NS, value: SubType<EndpointCapability, NS>, deltaId: symbol): boolean;
-    on<NS extends keyof EndpointCapability>(event: 'capability', listener: (namespace: NS, value: SubType<EndpointCapability, NS>, deltaId: symbol) => void): this;
-    once<NS extends keyof EndpointCapability>(event: 'capability', listener: (namespace: NS, value: SubType<EndpointCapability, NS>, deltaId: symbol) => void): this;
-    removeListener<NS extends keyof EndpointCapability>(event: 'capability', listener: (namespace: NS, value: SubType<EndpointCapability, NS>, deltaId: symbol) => void): this;
-    emit<NS extends keyof EndpointState, N extends keyof EndpointState[NS]>(event: 'state', namespace: NS, name: N, value: SubType<SubType<EndpointState, NS>, N>, deltaId: symbol): boolean;
-    on<NS extends keyof EndpointState, N extends keyof EndpointState[NS]>(event: 'state', listener: (namespace: NS, name: N, value: SubType<SubType<EndpointState, NS>, N>, deltaId: symbol) => void): this;
-    once<NS extends keyof EndpointState, N extends keyof EndpointState[NS]>(event: 'state', listener: (namespace: NS, name: N, value: SubType<SubType<EndpointState, NS>, N>, deltaId: symbol) => void): this;
-    removeListener<NS extends keyof EndpointState, N extends keyof EndpointState[NS]>(event: 'state', listener: (namespace: NS, name: N, value: SubType<SubType<EndpointState, NS>, N>, deltaId: symbol) => void): this;
-    emit(event: 'settings', data: EndpointSettings): boolean
-    on(event: 'settings', listener: (data: EndpointSettings) => void): this
-    once(event: 'settings', listener: (data: EndpointSettings) => void): this
-    removeListener(event: 'settings', listener: (data: EndpointSettings) => void): this
+    /**
+     * Update info
+     * @param data endpoint info
+     * @param deltaId change id
+     */
+    updateInfo(data: EndpointInfo, deltaId: symbol): void
+    /**
+     * Update a capability for a namespace
+     * @param namespace capability namespace
+     * @param value capability value
+     * @param deltaId change id
+     */
+    updateCapability<NS extends keyof EndpointCapability>(namespace: NS, value: SubType<EndpointCapability, NS>, deltaId: symbol): void
+    /**
+     * Update state for a namespace/name
+     * @param namespace state namespace
+     * @param name state name
+     * @param value state value
+     * @param deltaId change id
+     */
+    updateState<NS extends keyof EndpointState, N extends keyof EndpointState[NS]>(namespace: NS, name: N, value: SubType<SubType<EndpointState, NS>, N>, deltaId: symbol): void
 }
 
 type EndpointSettings =
     EndpointCapability
     & Partial<Pick<EndpointInfo, Exclude<keyof EndpointInfo, 'endpointId'>>>
-class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpointEmitter {
+class AlexaEndpointConnectorImpl extends IotShadowEndpoint<EndpointState> implements AlexaEndpointConnector {
     readonly alexaStateEmitter: AlexaStateEmitter = new EventEmitter();
-    readonly alexaDirectiveEmitter: AlexaDirectiveEmitter = new EventEmitter();
     readonly endpoint: AlexaEndpoint = {};
-    private readonly deltaPromises = new Map<symbol, Promise<void>[]>();
     private readonly deltaEndpointsState = new Map<symbol, AlexaEndpoint>();
     private readonly deltaEndpointSettings = new Map<symbol, EndpointSettings>();
-    private readonly shadowClient: iotshadow.IotShadowClient;
     private readonly settingsTopic: string;
-    private readonly namedShadowRequest: NamedShadowRequest
     readonly directiveHandlers: DirectiveHandlers = {};
     private readonly decoder = new TextDecoder('utf8');
-    constructor(readonly endpointId: string, readonly mqttConnection: mqtt.MqttClientConnection) {
-        super();
-        const appConfig = alexaConfig()
-        this.shadowClient = new iotshadow.IotShadowClient(mqttConnection);
-        this.namedShadowRequest = {
-            shadowName: endpointId,
-            thingName: appConfig.clientId
-        }
+    constructor(endpointId: string) {
+        super(endpointId);
 
         this.settingsTopic = this.topicPrefix + 'settings'
 
-        this.on('info', this.updateInfo);
-        this.on('capability', this.updateCapability);
-        this.on('state', this.updateState);
-        this.on('settings', this.publishSettings.bind(this));
-        this.on('delta', this.publishReportedState.bind(this));
-
         this.setMaxListeners(20)
+    }
+    refreshState(deltaId: symbol): void {
+        this.emit('refreshState', deltaId)
+    }
+    refreshInfo(deltaId: symbol): void {
+        this.emit('refreshInfo', deltaId)
+    }
+    refreshCapability(deltaId: symbol): void {
+        this.emit('refreshCapability', deltaId)
     }
 
     private get topicPrefix() {
         return endpointTopicPrefix(this.namedShadowRequest.thingName, 'alexa', this.endpointId)
     }
 
-    private verifyMqttSubscription(req: mqtt.MqttSubscribeRequest) {
-        if (req.error_code) {
-            const message = `Failed to subscibe to topic ${req.topic} error code ${req.error_code}`
-            console.error(message)
-            throw new Error(message)
-        }
-    }
     async subscribeMessages() {
+        await super.subscribeMessages()
         const directiveTopic = this.topicPrefix + 'directive/#'
-        const directive = await this.mqttConnection.subscribe(directiveTopic, mqtt.QoS.AtLeastOnce, this.directiveHandler.bind(this))
+        const directive = await awsConnection().subscribe(directiveTopic, mqtt.QoS.AtMostOnce, this.directiveHandler.bind(this))
         this.verifyMqttSubscription(directive)
-
-        const deleteAccepted = await this.shadowClient.subscribeToDeleteNamedShadowAccepted(this.namedShadowRequest,
-            mqtt.QoS.AtLeastOnce,
-            this.shadowDeleteAcceptedHandler.bind(this))
-        this.verifyMqttSubscription(deleteAccepted)
-
-        const shadowDeleteError = await this.shadowClient.subscribeToDeleteNamedShadowRejected(this.namedShadowRequest,
-            mqtt.QoS.AtLeastOnce, this.shadowErrorHandler.bind(this))
-        this.verifyMqttSubscription(shadowDeleteError)
-
-        const deleteShadow = await this.shadowClient.publishDeleteNamedShadow(this.namedShadowRequest, mqtt.QoS.AtLeastOnce)
-
-        const shadowDelta = await this.shadowClient.subscribeToNamedShadowDeltaUpdatedEvents(this.namedShadowRequest,
-            mqtt.QoS.AtLeastOnce, this.shadowDeltaHandler.bind(this))
-        this.verifyMqttSubscription(shadowDelta)
-
-        const shadowUpdateError = await this.shadowClient.subscribeToUpdateNamedShadowRejected(this.namedShadowRequest,
-            mqtt.QoS.AtLeastOnce, this.shadowErrorHandler.bind(this))
-        this.verifyMqttSubscription(shadowUpdateError)
     }
 
     registerDirectiveHandler<NS extends keyof DirectiveHandlers>(namespace: NS, directiveHandler: SubType<DirectiveHandlers, NS>): void {
         this.directiveHandlers[namespace] = directiveHandler;
-    }
-    watchDeltaUpdate(promise: Promise<void>, deltaId: symbol) {
-        let transPromises = this.deltaPromises.get(deltaId);
-        if (!transPromises) {
-            transPromises = [];
-            this.deltaPromises.set(deltaId, transPromises);
-        }
-        transPromises.push(promise
-            .catch((err) => {
-                console.log(err)
-            }));
+        // Listen for refresh requests if interfaces are implemented
+        ['refreshState', 'refreshCapability', 'refreshInfo'].forEach((value => {
+            if (directiveHandler[value]) {
+                this.on(value, directiveHandler[value].bind(directiveHandler))
+            }
+        }))
     }
     private getDeltaEndpoint(deltaId: symbol) {
         let deltaEndpoint = this.deltaEndpointsState.get(deltaId);
@@ -168,13 +164,13 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
         }
         return deltaEndpoint;
     }
-    private updateInfo(data: EndpointInfo, deltaId: symbol) {
+    public updateInfo(data: EndpointInfo, deltaId: symbol) {
         merge(this.getDeltaSettings(deltaId), data);
     }
-    private updateCapability<NS extends keyof EndpointCapability>(namespace: NS, value: SubType<EndpointCapability, NS>, deltaId: symbol) {
+    public updateCapability<NS extends keyof EndpointCapability>(namespace: NS, value: SubType<EndpointCapability, NS>, deltaId: symbol) {
         this.getDeltaSettings(deltaId)[namespace] = value;
     }
-    private updateState<NS extends keyof EndpointState, N extends keyof EndpointState[NS]>(namespace: NS, name: N, value: SubType<SubType<EndpointState, NS>, N>, deltaId: symbol) {
+    public updateState<NS extends keyof EndpointState, N extends keyof EndpointState[NS]>(namespace: NS, name: N, value: SubType<SubType<EndpointState, NS>, N>, deltaId: symbol) {
         this.mergeState(namespace, name, value, this.endpoint);
         this.mergeState(namespace, name, value, this.getDeltaEndpoint(deltaId));
         this.alexaStateEmitter.emit(namespace, name, value);
@@ -188,44 +184,28 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
         nsValue[name] = value;
     }
     async refresh(deltaId: symbol): Promise<void> {
-        this.emit('refreshState', deltaId);
-        this.emit('refreshInfo', deltaId);
-        this.emit('refreshCapability', deltaId);
+        this.refreshState(deltaId);
+        this.refreshInfo(deltaId);
+        this.refreshCapability(deltaId);
         await this.completeDeltaState(deltaId);
         await this.completeDeltaSettings(deltaId);
     }
 
-    private async waitDeltaPromises(deltaId: symbol) {
-        const promises = this.deltaPromises.get(deltaId);
-        if (promises) {
-            await Promise.all(promises);
-            this.deltaPromises.delete(deltaId);
-        }
-    }
     async completeDeltaState(deltaId: symbol) {
         await this.waitDeltaPromises(deltaId);
-        this.emit('delta', this.deltaEndpointsState.get(deltaId), deltaId);
+        this.publishReportedState(this.deltaEndpointsState.get(deltaId))
         this.deltaEndpointsState.delete(deltaId);
     }
     async completeDeltaSettings(deltaId: symbol) {
         await this.waitDeltaPromises(deltaId);
-        this.emit('settings', this.deltaEndpointSettings.get(deltaId));
+        await this.publishSettings(this.deltaEndpointSettings.get(deltaId));
         this.deltaEndpointSettings.delete(deltaId);
     }
 
     private async publishSettings(settings: EndpointSettings) {
-        await this.mqttConnection.publish(this.settingsTopic, settings, mqtt.QoS.AtLeastOnce)
+        await awsConnection().publish(this.settingsTopic, settings, mqtt.QoS.AtMostOnce)
     }
 
-    private publishReportedState(state: AlexaEndpoint) {
-        this.shadowClient.publishUpdateNamedShadow({
-            ...this.namedShadowRequest, ...{
-                state: {
-                    reported: state
-                }
-            }
-        }, mqtt.QoS.AtLeastOnce)
-    }
 
     private async directiveHandler(topic: string, payload: ArrayBuffer) {
         const start = Date.now()
@@ -257,36 +237,8 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
         this.sendResponse(req, resp, start)
     }
 
-    private async shadowDeltaHandler(error?: iotshadow.IotShadowError, response?: iotshadow.model.ShadowDeltaUpdatedEvent) {
-        this.handleShadowError('Delta', error)
-        if (response) {
-            try {
-                await routeStateDelta(response.state, this.directiveHandlers)
-            } catch (err) {
-                console.log("%s error: %o response: %o", this.endpointId, err, response)
-            }
-        }
-    }
-
-    private handleShadowError(errorType: string, error?: iotshadow.IotShadowError) {
-        if (error) {
-            console.log("%s error %o", errorType, error)
-        }
-    }
-    private shadowDeleteAcceptedHandler(error?: iotshadow.IotShadowError, response?: iotshadow.model.DeleteShadowResponse) {
-        this.handleShadowError('Delete', error)
-        if (response) {
-            console.info("%s shadow deleted", this.endpointId)
-        }
-        const deltaId = Symbol()
-        this.emit('refreshState', deltaId)
-        this.completeDeltaState(deltaId)
-    }
-    private shadowErrorHandler(error?: iotshadow.IotShadowError, response?: iotshadow.model.ErrorResponse) {
-        this.handleShadowError('Shadow Error', error)
-        if (response) {
-            console.error('%s Shadow error %o', this.endpointId, response)
-        }
+    protected async handleDeltaState(state: EndpointState): Promise<void> {
+        await routeStateDelta(state, this.directiveHandlers)
     }
 
     private sendResponse(req: RequestMessage<any>, resp: ResponseMessage<any>, startTime: number): void {
@@ -307,7 +259,7 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
             replyTopic = req.replyTopic.sync;
         }
         if (replyTopic) {
-            this.mqttConnection.publish(replyTopic, resp, mqtt.QoS.AtLeastOnce, false)
+            awsConnection().publish(replyTopic, resp, mqtt.QoS.AtMostOnce, false)
         }
     }
     private async delegateDirective<NS extends keyof DirectiveHandlers, N extends keyof DirectiveHandlers[NS]>(commandArgs: string[], request: any): Promise<ResponseMessage<any>> {
@@ -325,7 +277,6 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
                     stateChange: respPayload.state,
                     error: false
                 }
-                this.alexaDirectiveEmitter.emit(namespace, name, request);
                 return resp
             } else {
                 const error: ErrorHolder = {
@@ -350,25 +301,19 @@ class AlexaEndpointEmitterNotifier extends EventEmitter implements AlexaEndpoint
     }
 }
 
-class AlexaAssistant implements Assistant<'alexa'>{
+class AlexaAssistant implements ServiceProviderEndpointFactory<'alexa'>{
     readonly name = 'alexa'
-    constructor(readonly mqttConnection: mqtt.MqttClientConnection) {
+    constructor() {
 
     }
-    async createEndpointEmitter(endpointId: string): Promise<AlexaEndpointEmitter> {
-        const ret = new AlexaEndpointEmitterNotifier(endpointId, this.mqttConnection);
+    async createEndpointConnector(endpointId: string): Promise<AlexaEndpointConnectorImpl> {
+        const ret = new AlexaEndpointConnectorImpl(endpointId);
         await ret.subscribeMessages();
         return ret;
     }
 }
 
 export async function registerAssistant() {
-    const connection = await createConnection();
-    providersEmitter.registerAssistant(new AlexaAssistant(connection));
+    serviceProviderManager.registerServiceProvider(new AlexaAssistant());
 }
 
-
-export interface NamedShadowRequest {
-    shadowName: string;
-    thingName: string;
-}

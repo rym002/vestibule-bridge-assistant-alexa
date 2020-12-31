@@ -1,13 +1,13 @@
 import { SeekController } from '@vestibule-link/alexa-video-skill-types';
-import { providersEmitter } from '@vestibule-link/bridge-assistant';
+import { serviceProviderManager } from '@vestibule-link/bridge-service-provider';
+import * as iot from '@vestibule-link/bridge-gateway-aws/dist/iot';
 import { EndpointInfo, EndpointState, endpointTopicPrefix, RequestMessage, SubType } from '@vestibule-link/iot-types';
 import { iotshadow, mqtt } from 'aws-iot-device-sdk-v2';
-import { assert } from 'chai';
 import 'mocha';
-import { createSandbox, createStubInstance, SinonSandbox, SinonStub, SinonStubbedInstance, SinonStubbedMember, stub, StubbableType } from 'sinon';
+import { createSandbox, match, SinonSandbox, SinonStub, SinonStubbedInstance, SinonStubbedMember, StubbableType } from 'sinon';
 import { DirectiveHandlers, SupportedDirectives } from '../src/directive';
-import { AlexaEndpointEmitter, registerAssistant } from '../src/endpoint';
-import * as iot from '../src/iot';
+import { AlexaEndpointConnector, registerAssistant } from '../src/endpoint';
+
 
 type StatelessPayload<T> = {
     payload: T
@@ -41,17 +41,30 @@ class TestRecordDirectiveHandler implements SubType<DirectiveHandlers, 'Alexa.Re
     }
 }
 const clientId = 'testClientId'
-describe('endpoint', () => {
-    let createConnectionStub: SinonStub
-    let connectionStub: StubbedClass<mqtt.MqttClientConnection>
-    const encoder = new TextEncoder()
-    const topicHandlerMap = {}
-    async function emitTopic(listenTopic: string, topic: string, req: any) {
-        await topicHandlerMap[listenTopic](topic, encoder.encode(JSON.stringify(req)))
+interface TopicHandlerMap {
+    [index: string]: (topic: string, payload: ArrayBuffer) => void | Promise<void>
+}
+const encoder = new TextEncoder()
+
+async function emitTopic(topicHandlerMap: TopicHandlerMap, listenTopic: string, topic: string, req: any) {
+    const topicHandler = topicHandlerMap[listenTopic]
+    if (topicHandler) {
+        await topicHandler(topic, encoder.encode(JSON.stringify(req)))
+    } else {
+        throw new Error(`Topic Handler not found for ${listenTopic}`)
     }
+}
+
+describe('endpoint', () => {
     before(async function () {
-        process.env.CLIENT_ID = clientId
-        connectionStub = createSinonStubInstance(mqtt.MqttClientConnection)
+        process.env.AWS_CLIENT_ID = clientId
+        await registerAssistant()
+    })
+    beforeEach(function () {
+        const sandbox = createContextSandbox(this)
+        const topicHandlerMap: TopicHandlerMap = {}
+
+        const connectionStub = createSinonStubInstance(sandbox, mqtt.MqttClientConnection)
         connectionStub.publish.returns(Promise.resolve({}))
         connectionStub.subscribe.callsFake((topic, qos, on_message) => {
             topicHandlerMap[topic] = on_message
@@ -60,39 +73,37 @@ describe('endpoint', () => {
                 qos: qos
             })
         })
-        createConnectionStub = stub(iot, 'createConnection').returns(Promise.resolve(connectionStub))
-        await registerAssistant()
-    })
-    beforeEach(function () {
-        const sandbox = createContextSandbox(this)
+        const createConnectionStub = sandbox.stub(iot, 'awsConnection').returns(connectionStub)
+        this.currentTest['topicHandlerMap'] = topicHandlerMap
+        this.currentTest['connection'] = connectionStub
     })
     afterEach(function () {
         restoreSandbox(this)
     })
-    after(() => {
-        createConnectionStub.restore()
-    })
+
     it('should request an endpoint refresh', async function () {
         const sandbox = getContextSandbox(this)
-        const endpointEmitter = <AlexaEndpointEmitter>await providersEmitter.getEndpointEmitter('alexa', 'testProvider_testRefresh', true)
+        const endpointConnector = await serviceProviderManager.getEndpointConnector('alexa', 'testProvider_testRefresh', true)
         const deltaId = Symbol()
-        const emitStub = <SinonStub<any, boolean>>sandbox.stub(endpointEmitter, 'emit');
-        endpointEmitter.refresh(deltaId);
-        assert(emitStub.calledWith('refreshState', deltaId))
-        assert(emitStub.calledWith('refreshCapability', deltaId))
-        assert(emitStub.calledWith('refreshInfo', deltaId))
+        const emitStub = <SinonStub<any, boolean>>sandbox.stub(endpointConnector, 'emit');
+        endpointConnector.refresh(deltaId);
+        sandbox.assert.calledWith(emitStub, 'refreshState', deltaId)
+        sandbox.assert.calledWith(emitStub, 'refreshCapability', deltaId)
+        sandbox.assert.calledWith(emitStub, 'refreshInfo', deltaId)
     })
 
     context('directives', () => {
         const directiveHandler = new TestDirectiveHandler();
         it('should reply on the sync topic', async function () {
             const sandbox = getContextSandbox(this)
+            const topicHandlerMap = this.test['topicHandlerMap']
+            const connection: StubbedClass<mqtt.MqttClientConnection> = this.test['connection']
             const endpointId = 'testProvider_testDirectiveSync'
-            const endpointEmitter = <AlexaEndpointEmitter>await providersEmitter.getEndpointEmitter('alexa', endpointId, true)
+            const endpointConnector = await serviceProviderManager.getEndpointConnector('alexa', endpointId, true)
             const directiveSpy = sandbox.spy(directiveHandler, 'AdjustSeekPosition');
             const namespace = 'Alexa.SeekController'
             const name = 'AdjustSeekPosition'
-            endpointEmitter.registerDirectiveHandler(namespace, directiveHandler);
+            endpointConnector.registerDirectiveHandler(namespace, directiveHandler);
             const topicBase = getDirectiveTopicBase(endpointId)
             const req: RequestMessage<any> = {
                 payload: {
@@ -102,18 +113,20 @@ describe('endpoint', () => {
                     sync: `testResponse/${endpointId}`
                 }
             }
-            const resp = await emitTopic(`${topicBase}#`, `${topicBase}${namespace}/${name}`, req)
-            assert(directiveSpy.calledWith(req.payload), 'Directive not called with payload');
-            assert(connectionStub.publish.calledWith(req.replyTopic.sync), 'Wrong reply topic')
+            const resp = await emitTopic(topicHandlerMap, `${topicBase}#`, `${topicBase}${namespace}/${name}`, req)
+            sandbox.assert.calledWith(directiveSpy, req.payload)
+            sandbox.assert.calledWith(connection.publish, req.replyTopic.sync, match.object, mqtt.QoS.AtMostOnce)
         })
         it('should reply on the sync topic when deferred is longer than response time', async function () {
             const sandbox = getContextSandbox(this)
+            const topicHandlerMap = this.test['topicHandlerMap']
+            const connection: StubbedClass<mqtt.MqttClientConnection> = this.test['connection']
             const endpointId = 'testProvider_testDirectiveSyncDeferred'
-            const endpointEmitter = <AlexaEndpointEmitter>await providersEmitter.getEndpointEmitter('alexa', endpointId, true)
+            const endpointConnector = await serviceProviderManager.getEndpointConnector('alexa', endpointId, true)
             const directiveSpy = sandbox.spy(directiveHandler, 'AdjustSeekPosition');
             const namespace = 'Alexa.SeekController'
             const name = 'AdjustSeekPosition'
-            endpointEmitter.registerDirectiveHandler(namespace, directiveHandler);
+            endpointConnector.registerDirectiveHandler(namespace, directiveHandler);
             const topicBase = getDirectiveTopicBase(endpointId)
             const req: RequestMessage<any> = {
                 payload: {
@@ -128,18 +141,20 @@ describe('endpoint', () => {
                     deferred: 100
                 }
             }
-            const resp = await emitTopic(`${topicBase}#`, `${topicBase}${namespace}/${name}`, req)
-            assert(directiveSpy.calledWith(req.payload), 'Directive not called with payload');
-            assert(connectionStub.publish.calledWith(req.replyTopic.sync), 'Wrong reply topic')
+            const resp = await emitTopic(topicHandlerMap, `${topicBase}#`, `${topicBase}${namespace}/${name}`, req)
+            sandbox.assert.calledWith(directiveSpy, req.payload)
+            sandbox.assert.calledWith(connection.publish, req.replyTopic.sync, match.object, mqtt.QoS.AtMostOnce)
         })
         it('should reply on the async topic when deferred is shorter than response time', async function () {
             const sandbox = getContextSandbox(this)
+            const topicHandlerMap = this.test['topicHandlerMap']
+            const connection: StubbedClass<mqtt.MqttClientConnection> = this.test['connection']
             const endpointId = 'testProvider_testDirectiveAsyncDeferred'
-            const endpointEmitter = <AlexaEndpointEmitter>await providersEmitter.getEndpointEmitter('alexa', endpointId, true)
+            const endpointConnector = await serviceProviderManager.getEndpointConnector('alexa', endpointId, true)
             const directiveSpy = sandbox.spy(directiveHandler, 'AdjustSeekPosition');
             const namespace = 'Alexa.SeekController'
             const name = 'AdjustSeekPosition'
-            endpointEmitter.registerDirectiveHandler(namespace, directiveHandler);
+            endpointConnector.registerDirectiveHandler(namespace, directiveHandler);
             const topicBase = getDirectiveTopicBase(endpointId)
             const req: RequestMessage<any> = {
                 payload: {
@@ -154,19 +169,21 @@ describe('endpoint', () => {
                     deferred: 0
                 }
             }
-            const resp = await emitTopic(`${topicBase}#`, `${topicBase}${namespace}/${name}`, req)
-            assert(directiveSpy.calledWith(req.payload), 'Directive not called with payload');
-            assert(connectionStub.publish.calledWith(req.replyTopic.async), 'Wrong reply topic')
+            const resp = await emitTopic(topicHandlerMap, `${topicBase}#`, `${topicBase}${namespace}/${name}`, req)
+            sandbox.assert.calledWith(directiveSpy, req.payload)
+            sandbox.assert.calledWith(connection.publish, req.replyTopic.async, match.object, mqtt.QoS.AtMostOnce)
         })
 
         it('should not reply maxAllowed is shorter than response time', async function () {
             const sandbox = getContextSandbox(this)
+            const topicHandlerMap = this.test['topicHandlerMap']
+            const connection: StubbedClass<mqtt.MqttClientConnection> = this.test['connection']
             const endpointId = 'testProvider_testDirectiveMaxAllowed'
-            const endpointEmitter = <AlexaEndpointEmitter>await providersEmitter.getEndpointEmitter('alexa', endpointId, true)
+            const endpointConnector = await serviceProviderManager.getEndpointConnector('alexa', endpointId, true)
             const directiveSpy = sandbox.spy(directiveHandler, 'AdjustSeekPosition');
             const namespace = 'Alexa.SeekController'
             const name = 'AdjustSeekPosition'
-            endpointEmitter.registerDirectiveHandler(namespace, directiveHandler);
+            endpointConnector.registerDirectiveHandler(namespace, directiveHandler);
             const topicBase = getDirectiveTopicBase(endpointId)
             const req: RequestMessage<any> = {
                 payload: {
@@ -181,13 +198,16 @@ describe('endpoint', () => {
                     deferred: 0
                 }
             }
-            const resp = await emitTopic(`${topicBase}#`, `${topicBase}${namespace}/${name}`, req)
-            assert(directiveSpy.calledWith(req.payload), 'Directive not called with payload');
-            assert(!connectionStub.publish.calledWith(req.replyTopic.async), 'Topic publish outside allowed')
+            const resp = await emitTopic(topicHandlerMap, `${topicBase}#`, `${topicBase}${namespace}/${name}`, req)
+            sandbox.assert.calledWith(directiveSpy, req.payload)
+            sandbox.assert.calledOnce(connection.publish)
         })
         it('should send error for invalid directive', async function () {
+            const sandbox = getContextSandbox(this)
             const endpointId = 'testProvider_testDirectiveError'
-            const endpointEmitter = <AlexaEndpointEmitter>await providersEmitter.getEndpointEmitter('alexa', endpointId, true)
+            const topicHandlerMap = this.test['topicHandlerMap']
+            const connection: StubbedClass<mqtt.MqttClientConnection> = this.test['connection']
+            const endpointConnector = await serviceProviderManager.getEndpointConnector('alexa', endpointId, true)
             const topicBase = getDirectiveTopicBase(endpointId)
             const req: RequestMessage<any> = {
                 payload: {
@@ -198,9 +218,8 @@ describe('endpoint', () => {
                 }
             }
             const namespace = 'Alexa.SeekController'
-            const resp = await emitTopic(`${topicBase}#`, `${topicBase}${namespace}/AdjustSeekPosition`, req)
-            assert(connectionStub.publish.calledWith(req.replyTopic.sync), 'Invalid Topic')
-            assert(connectionStub.publish.calledWith(req.replyTopic.sync, {
+            const resp = await emitTopic(topicHandlerMap, `${topicBase}#`, `${topicBase}${namespace}/AdjustSeekPosition`, req)
+            sandbox.assert.calledWith(connection.publish, req.replyTopic.sync, {
                 error: true,
                 payload: {
                     errorType: 'Alexa',
@@ -209,11 +228,14 @@ describe('endpoint', () => {
                         message: `Directive Handler Not Found: ${namespace}`
                     }
                 }
-            }), 'Invalid Response Payload')
+            }, mqtt.QoS.AtMostOnce)
         })
         it('should send error for unsupported operation', async function () {
             const endpointId = 'testProvider_testDirectiveOperation'
-            const endpointEmitter = <AlexaEndpointEmitter>await providersEmitter.getEndpointEmitter('alexa', endpointId, true)
+            const sandbox = getContextSandbox(this)
+            const topicHandlerMap = this.test['topicHandlerMap']
+            const connection: StubbedClass<mqtt.MqttClientConnection> = this.test['connection']
+            const endpointConnector = await serviceProviderManager.getEndpointConnector('alexa', endpointId, true)
             const topicBase = getDirectiveTopicBase(endpointId)
             const req: RequestMessage<any> = {
                 payload: {
@@ -224,11 +246,10 @@ describe('endpoint', () => {
                 }
             }
             const namespace = 'Alexa.RecordController'
-            endpointEmitter.registerDirectiveHandler(namespace, new TestRecordDirectiveHandler());
+            endpointConnector.registerDirectiveHandler(namespace, new TestRecordDirectiveHandler());
             const name = 'StopRecording'
-            const resp = await emitTopic(`${topicBase}#`, `${topicBase}${namespace}/${name}`, req)
-            assert(connectionStub.publish.calledWith(req.replyTopic.sync), 'Invalid Topic')
-            assert(connectionStub.publish.calledWith(req.replyTopic.sync, {
+            const resp = await emitTopic(topicHandlerMap, `${topicBase}#`, `${topicBase}${namespace}/${name}`, req)
+            sandbox.assert.calledWith(connection.publish, req.replyTopic.sync, {
                 error: true,
                 payload: {
                     errorType: 'Alexa',
@@ -237,37 +258,36 @@ describe('endpoint', () => {
                         message: `Not supported command: ${namespace}:${name}`
                     }
                 }
-            }), 'Invalid Response Payload')
+            }, mqtt.QoS.AtMostOnce)
         })
     })
     context('state', () => {
-        const delegateEndpointId = 'state_Endpoint'
-        const delegateTopic = getShadowDeltaTopic(delegateEndpointId)
-        before(async function () {
-            const endpointEmitter = <AlexaEndpointEmitter>await providersEmitter.getEndpointEmitter('alexa', delegateEndpointId, true)
-            this['emitter'] = endpointEmitter
+        beforeEach(async function () {
+            const id = this.currentTest.title.replace(/ /g, '')
+            const endpointConnector = await serviceProviderManager.getEndpointConnector('alexa', id, true)
+            this.currentTest['connector'] = endpointConnector
         })
         it('should publish state changes', async function () {
             const endpointId = 'testProvider_testDelta'
             const sandbox = getContextSandbox(this)
-            const endpointEmitter = <AlexaEndpointEmitter>await providersEmitter.getEndpointEmitter('alexa', endpointId, true)
+            const connection: StubbedClass<mqtt.MqttClientConnection> = this.test['connection']
+            const endpointConnector = await serviceProviderManager.getEndpointConnector('alexa', endpointId, true)
             const deltaId = Symbol()
-            const emitStub = sandbox.stub(providersEmitter, 'emit');
-            endpointEmitter.emit('state', 'Alexa.PlaybackStateReporter', 'playbackState', { state: 'PLAYING' }, deltaId);
-            await endpointEmitter.completeDeltaState(deltaId);
+            endpointConnector.updateState('Alexa.PlaybackStateReporter', 'playbackState', { state: 'PLAYING' }, deltaId);
+            await endpointConnector.completeDeltaState(deltaId);
             const topic = `$aws/things/${clientId}/shadow/name/${endpointId}/update`;
-            assert(emitStub.called, 'State event not published')
-            assert(connectionStub.publish.calledWith(topic, JSON.stringify({
+            sandbox.assert.calledWith(connection.publish, topic, JSON.stringify({
                 shadowName: endpointId,
                 thingName: clientId,
-                state: {
-                    reported: {
-                        'Alexa.PlaybackStateReporter': {
-                            playbackState: { state: 'PLAYING' }
-                        }
+                desired: {
+                    'Alexa.PlaybackStateReporter': null
+                },
+                reported: {
+                    'Alexa.PlaybackStateReporter': {
+                        playbackState: { state: 'PLAYING' }
                     }
                 }
-            })), 'Settings not published')
+            }), mqtt.QoS.AtLeastOnce)
         })
         context('ChannelController', () => {
             class DirectiveHandler implements SubType<DirectiveHandlers, 'Alexa.ChannelController'>{
@@ -284,15 +304,16 @@ describe('endpoint', () => {
                 }
             }
             const namespace = 'Alexa.ChannelController'
-            before(async function () {
-                const endpointEmitter: AlexaEndpointEmitter = this['emitter']
-                endpointEmitter.registerDirectiveHandler(namespace, new DirectiveHandler());
-                this['emitter'] = endpointEmitter
+            beforeEach(async function () {
+                const endpointConnector: AlexaEndpointConnector = this.currentTest['connector']
+                endpointConnector.registerDirectiveHandler(namespace, new DirectiveHandler());
             })
             it('should call ChangeChannel', async function () {
                 const sandbox = getContextSandbox(this)
-                const endpointEmitter: AlexaEndpointEmitter = this['emitter']
-                const handlerSpy = sandbox.spy(endpointEmitter.directiveHandlers[namespace], 'ChangeChannel')
+                const topicHandlerMap = this.test['topicHandlerMap']
+                const endpointConnector: AlexaEndpointConnector = this.test['connector']
+                const delegateTopic = getShadowDeltaTopic(endpointConnector.endpointId)
+                const handlerSpy = sandbox.spy(endpointConnector.directiveHandlers[namespace], 'ChangeChannel')
                 const state: EndpointState = {
                     [namespace]: {
                         channel: {
@@ -301,10 +322,11 @@ describe('endpoint', () => {
                     }
                 }
                 const req: iotshadow.model.ShadowDeltaUpdatedEvent = {
-                    state: state
+                    state: state,
+                    version: 1
                 }
-                await emitTopic(delegateTopic, delegateTopic, req)
-                assert(handlerSpy.called, 'Handler not called')
+                await emitTopic(topicHandlerMap, delegateTopic, delegateTopic, req)
+                sandbox.assert.called(handlerSpy)
             })
         })
         context('PlaybackStateReporter', () => {
@@ -353,15 +375,16 @@ describe('endpoint', () => {
             }
             const namespace = 'Alexa.PlaybackStateReporter'
             const directiveNamespace = 'Alexa.PlaybackController'
-            before(async function () {
-                const endpointEmitter: AlexaEndpointEmitter = this['emitter']
-                endpointEmitter.registerDirectiveHandler(directiveNamespace, new DirectiveHandler());
-                this['emitter'] = endpointEmitter
+            beforeEach(async function () {
+                const endpointConnector: AlexaEndpointConnector = this.currentTest['connector']
+                endpointConnector.registerDirectiveHandler(directiveNamespace, new DirectiveHandler());
             })
             it('should call Play', async function () {
                 const sandbox = getContextSandbox(this)
-                const endpointEmitter: AlexaEndpointEmitter = this['emitter']
-                const handlerSpy = sandbox.spy(endpointEmitter.directiveHandlers[directiveNamespace], 'Play')
+                const topicHandlerMap = this.test['topicHandlerMap']
+                const endpointConnector: AlexaEndpointConnector = this.test['connector']
+                const delegateTopic = getShadowDeltaTopic(endpointConnector.endpointId)
+                const handlerSpy = sandbox.spy(endpointConnector.directiveHandlers[directiveNamespace], 'Play')
                 const state: EndpointState = {
                     [namespace]: {
                         playbackState: {
@@ -370,16 +393,19 @@ describe('endpoint', () => {
                     }
                 }
                 const req: iotshadow.model.ShadowDeltaUpdatedEvent = {
-                    state: state
+                    state: state,
+                    version: 1
                 }
-                await emitTopic(delegateTopic, delegateTopic, req)
-                assert(handlerSpy.called, 'Handler not called')
+                await emitTopic(topicHandlerMap, delegateTopic, delegateTopic, req)
+                sandbox.assert.called(handlerSpy)
             })
 
             it('should call Pause', async function () {
                 const sandbox = getContextSandbox(this)
-                const endpointEmitter: AlexaEndpointEmitter = this['emitter']
-                const handlerSpy = sandbox.spy(endpointEmitter.directiveHandlers[directiveNamespace], 'Pause')
+                const topicHandlerMap = this.test['topicHandlerMap']
+                const endpointConnector: AlexaEndpointConnector = this.test['connector']
+                const delegateTopic = getShadowDeltaTopic(endpointConnector.endpointId)
+                const handlerSpy = sandbox.spy(endpointConnector.directiveHandlers[directiveNamespace], 'Pause')
                 const state: EndpointState = {
                     [namespace]: {
                         playbackState: {
@@ -388,15 +414,18 @@ describe('endpoint', () => {
                     }
                 }
                 const req: iotshadow.model.ShadowDeltaUpdatedEvent = {
-                    state: state
+                    state: state,
+                    version: 1
                 }
-                await emitTopic(delegateTopic, delegateTopic, req)
-                assert(handlerSpy.called, 'Handler not called')
+                await emitTopic(topicHandlerMap, delegateTopic, delegateTopic, req)
+                sandbox.assert.called(handlerSpy)
             })
             it('should call Stop', async function () {
                 const sandbox = getContextSandbox(this)
-                const endpointEmitter: AlexaEndpointEmitter = this['emitter']
-                const handlerSpy = sandbox.spy(endpointEmitter.directiveHandlers[directiveNamespace], 'Stop')
+                const topicHandlerMap = this.test['topicHandlerMap']
+                const endpointConnector: AlexaEndpointConnector = this.test['connector']
+                const delegateTopic = getShadowDeltaTopic(endpointConnector.endpointId)
+                const handlerSpy = sandbox.spy(endpointConnector.directiveHandlers[directiveNamespace], 'Stop')
                 const state: EndpointState = {
                     [namespace]: {
                         playbackState: {
@@ -405,10 +434,11 @@ describe('endpoint', () => {
                     }
                 }
                 const req: iotshadow.model.ShadowDeltaUpdatedEvent = {
-                    state: state
+                    state: state,
+                    version: 1
                 }
-                await emitTopic(delegateTopic, delegateTopic, req)
-                assert(handlerSpy.called, 'Handler not called')
+                await emitTopic(topicHandlerMap, delegateTopic, delegateTopic, req)
+                sandbox.assert.called(handlerSpy)
             })
         })
         context('PowerController', () => {
@@ -426,40 +456,45 @@ describe('endpoint', () => {
                 }
             }
             const namespace = 'Alexa.PowerController'
-            before(async function () {
-                const endpointEmitter: AlexaEndpointEmitter = this['emitter']
-                endpointEmitter.registerDirectiveHandler(namespace, new DirectiveHandler());
-                this['emitter'] = endpointEmitter
+            beforeEach(async function () {
+                const endpointConnector: AlexaEndpointConnector = this.currentTest['connector']
+                endpointConnector.registerDirectiveHandler(namespace, new DirectiveHandler());
             })
             it('should call TurnOff', async function () {
                 const sandbox = getContextSandbox(this)
-                const endpointEmitter: AlexaEndpointEmitter = this['emitter']
-                const handlerSpy = sandbox.spy(endpointEmitter.directiveHandlers[namespace], 'TurnOff')
+                const topicHandlerMap = this.test['topicHandlerMap']
+                const endpointConnector: AlexaEndpointConnector = this.test['connector']
+                const delegateTopic = getShadowDeltaTopic(endpointConnector.endpointId)
+                const handlerSpy = sandbox.spy(endpointConnector.directiveHandlers[namespace], 'TurnOff')
                 const state: EndpointState = {
                     [namespace]: {
                         powerState: 'OFF'
                     }
                 }
                 const req: iotshadow.model.ShadowDeltaUpdatedEvent = {
-                    state: state
+                    state: state,
+                    version: 1
                 }
-                await emitTopic(delegateTopic, delegateTopic, req)
-                assert(handlerSpy.called, 'Handler not called')
+                await emitTopic(topicHandlerMap, delegateTopic, delegateTopic, req)
+                sandbox.assert.called(handlerSpy)
             })
             it('should call TurnOn', async function () {
                 const sandbox = getContextSandbox(this)
-                const endpointEmitter: AlexaEndpointEmitter = this['emitter']
-                const handlerSpy = sandbox.spy(endpointEmitter.directiveHandlers[namespace], 'TurnOn')
+                const topicHandlerMap = this.test['topicHandlerMap']
+                const endpointConnector: AlexaEndpointConnector = this.test['connector']
+                const delegateTopic = getShadowDeltaTopic(endpointConnector.endpointId)
+                const handlerSpy = sandbox.spy(endpointConnector.directiveHandlers[namespace], 'TurnOn')
                 const state: EndpointState = {
                     [namespace]: {
                         powerState: 'ON'
                     }
                 }
                 const req: iotshadow.model.ShadowDeltaUpdatedEvent = {
-                    state: state
+                    state: state,
+                    version: 1
                 }
-                await emitTopic(delegateTopic, delegateTopic, req)
-                assert(handlerSpy.called, 'Handler not called')
+                await emitTopic(topicHandlerMap, delegateTopic, delegateTopic, req)
+                sandbox.assert.called(handlerSpy)
             })
 
         })
@@ -478,80 +513,63 @@ describe('endpoint', () => {
                 }
             }
             const namespace = 'Alexa.RecordController'
-            before(async function () {
-                const endpointEmitter: AlexaEndpointEmitter = this['emitter']
-                endpointEmitter.registerDirectiveHandler(namespace, new DirectiveHandler());
-                this['emitter'] = endpointEmitter
+            beforeEach(async function () {
+                const endpointConnector: AlexaEndpointConnector = this.currentTest['connector']
+                endpointConnector.registerDirectiveHandler(namespace, new DirectiveHandler());
             })
             it('should call StartRecording', async function () {
                 const sandbox = getContextSandbox(this)
-                const endpointEmitter: AlexaEndpointEmitter = this['emitter']
-                const handlerSpy = sandbox.spy(endpointEmitter.directiveHandlers[namespace], 'StartRecording')
+                const topicHandlerMap = this.test['topicHandlerMap']
+                const endpointConnector: AlexaEndpointConnector = this.test['connector']
+                const delegateTopic = getShadowDeltaTopic(endpointConnector.endpointId)
+                const handlerSpy = sandbox.spy(endpointConnector.directiveHandlers[namespace], 'StartRecording')
                 const state: EndpointState = {
                     [namespace]: {
                         RecordingState: 'RECORDING'
                     }
                 }
                 const req: iotshadow.model.ShadowDeltaUpdatedEvent = {
-                    state: state
+                    state: state,
+                    version: 1
                 }
-                await emitTopic(delegateTopic, delegateTopic, req)
-                assert(handlerSpy.called, 'Handler not called')
+                await emitTopic(topicHandlerMap, delegateTopic, delegateTopic, req)
+                sandbox.assert.called(handlerSpy)
             })
             it('should call StopRecording', async function () {
                 const sandbox = getContextSandbox(this)
-                const endpointEmitter: AlexaEndpointEmitter = this['emitter']
-                const handlerSpy = sandbox.spy(endpointEmitter.directiveHandlers[namespace], 'StopRecording')
+                const topicHandlerMap = this.test['topicHandlerMap']
+                const endpointConnector: AlexaEndpointConnector = this.test['connector']
+                const delegateTopic = getShadowDeltaTopic(endpointConnector.endpointId)
+                const handlerSpy = sandbox.spy(endpointConnector.directiveHandlers[namespace], 'StopRecording')
                 const state: EndpointState = {
                     [namespace]: {
                         RecordingState: 'NOT_RECORDING'
                     }
                 }
                 const req: iotshadow.model.ShadowDeltaUpdatedEvent = {
-                    state: state
+                    state: state,
+                    version: 1
                 }
-                await emitTopic(delegateTopic, delegateTopic, req)
-                assert(handlerSpy.called, 'Handler not called')
+                await emitTopic(topicHandlerMap, delegateTopic, delegateTopic, req)
+                sandbox.assert.called(handlerSpy)
             })
 
         })
     })
     context('settings', () => {
-        it('should emit settings when a capability is updated', async function () {
+        it('should publish settings when a capability is updated', async function () {
             const sandbox = getContextSandbox(this)
+            const connection: StubbedClass<mqtt.MqttClientConnection> = this.test['connection']
             const endpointId = 'testCapabilities';
-            const endpointEmitter = <AlexaEndpointEmitter>await providersEmitter.getEndpointEmitter('alexa', endpointId, true)
+            const endpointConnector = await serviceProviderManager.getEndpointConnector('alexa', endpointId, true)
             const deltaId = Symbol()
-            const emitStub = sandbox.stub(providersEmitter.getEndpointSettingsEmitter('alexa'), 'emit');
-            endpointEmitter.emit('capability', 'Alexa.ChannelController', ['channel'], deltaId);
-            await endpointEmitter.completeDeltaSettings(deltaId);
-            assert(emitStub.calledOnceWith('settings', endpointId, {
+            endpointConnector.updateCapability('Alexa.ChannelController', ['channel'], deltaId);
+            await endpointConnector.completeDeltaSettings(deltaId);
+
+            const topic = endpointTopicPrefix(clientId, 'alexa', endpointId) + 'settings'
+            sandbox.assert.calledWith(connection.publish, topic, {
                 'Alexa.ChannelController': ['channel']
-            }), 'Settings event not sent')
-
-            const topic = endpointTopicPrefix(clientId, 'alexa', endpointId) + 'settings'
-            assert(connectionStub.publish.calledWith(topic), 'Settings topic not published')
-
-        })
-        it('should emit settings when info is updated', async function () {
-            const sandbox = getContextSandbox(this)
-            const endpointId = 'testInfo';
-            const endpointEmitter = <AlexaEndpointEmitter>await providersEmitter.getEndpointEmitter('alexa', endpointId, true)
-            const deltaId = Symbol()
-            const emitStub = sandbox.stub(providersEmitter.getEndpointSettingsEmitter('alexa'), 'emit');
-            const info: EndpointInfo = {
-                endpointId: endpointId,
-                description: 'desc',
-                friendlyName: 'friend',
-                manufacturerName: 'manufacturer',
-                displayCategories: ['ACTIVITY_TRIGGER']
-            }
-            endpointEmitter.emit('info', info, deltaId);
-            await endpointEmitter.completeDeltaSettings(deltaId);
-            assert(emitStub.calledOnceWith('settings', endpointId, info), 'Settings event not sent')
-
-            const topic = endpointTopicPrefix(clientId, 'alexa', endpointId) + 'settings'
-            assert(connectionStub.publish.calledWith(topic), 'Settings topic not published')
+            }, mqtt.QoS.AtMostOnce)
 
         })
     })
@@ -559,10 +577,11 @@ describe('endpoint', () => {
 
 type StubbedClass<T> = SinonStubbedInstance<T> & T;
 function createSinonStubInstance<T>(
+    sandbox: SinonSandbox,
     constructor: StubbableType<T>,
     overrides?: { [K in keyof T]?: SinonStubbedMember<T[K]> },
 ): StubbedClass<T> {
-    const stub = createStubInstance<T>(constructor, overrides);
+    const stub = sandbox.createStubInstance<T>(constructor, overrides);
     return stub as unknown as StubbedClass<T>;
 }
 
