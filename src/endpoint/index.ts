@@ -47,7 +47,7 @@ export interface AlexaStateEmitter {
 /**
  * Endpoint connector for alexa using aws iot
  */
-export interface AlexaEndpointConnector extends IotShadowEndpoint, StateEmitter, InfoEmitter, CapabilityEmitter {
+export interface AlexaEndpointConnector extends IotShadowEndpoint<AlexaEndpoint>, StateEmitter, InfoEmitter, CapabilityEmitter {
     /**
      * DirectiveHandlers supported by this endpoint
      */
@@ -63,12 +63,6 @@ export interface AlexaEndpointConnector extends IotShadowEndpoint, StateEmitter,
      * @param directiveHandler directive handler for namespace
      */
     registerDirectiveHandler<NS extends keyof DirectiveHandlers>(namespace: NS, directiveHandler: SubType<DirectiveHandlers, NS>): void;
-    /**
-     * Indicates all changes have been sent.
-     * Connector should update the shadow with the changes based on deltaId
-     * @param deltaId change id
-     */
-    completeDeltaState(deltaId: symbol): Promise<void>;
     /**
      * Indicates all changes have been sent
      * Connector should update the endpoint settings based on deltaId
@@ -103,8 +97,6 @@ type EndpointSettings =
     & Partial<Pick<EndpointInfo, Exclude<keyof EndpointInfo, 'endpointId'>>>
 class AlexaEndpointConnectorImpl extends AbstractIotShadowEndpoint<EndpointState> implements AlexaEndpointConnector {
     readonly alexaStateEmitter: AlexaStateEmitter = new EventEmitter();
-    readonly endpoint: AlexaEndpoint = {};
-    private readonly deltaEndpointsState = new Map<symbol, AlexaEndpoint>();
     private readonly deltaEndpointSettings = new Map<symbol, EndpointSettings>();
     private readonly settingsTopic: string;
     readonly directiveHandlers: DirectiveHandlers = {};
@@ -146,14 +138,6 @@ class AlexaEndpointConnectorImpl extends AbstractIotShadowEndpoint<EndpointState
             }
         }))
     }
-    private getDeltaEndpoint(deltaId: symbol) {
-        let deltaEndpoint = this.deltaEndpointsState.get(deltaId);
-        if (!deltaEndpoint) {
-            deltaEndpoint = {};
-            this.deltaEndpointsState.set(deltaId, deltaEndpoint);
-        }
-        return deltaEndpoint;
-    }
     private getDeltaSettings(deltaId: symbol) {
         let deltaEndpoint = this.deltaEndpointSettings.get(deltaId);
         if (!deltaEndpoint) {
@@ -171,7 +155,6 @@ class AlexaEndpointConnectorImpl extends AbstractIotShadowEndpoint<EndpointState
         this.getDeltaSettings(deltaId)[namespace] = value;
     }
     public updateState<NS extends keyof EndpointState, N extends keyof EndpointState[NS]>(namespace: NS, name: N, value: SubType<SubType<EndpointState, NS>, N>, deltaId: symbol) {
-        this.mergeState(namespace, name, value, this.endpoint);
         this.mergeState(namespace, name, value, this.getDeltaEndpoint(deltaId));
         this.alexaStateEmitter.emit(namespace, name, value);
     }
@@ -191,11 +174,6 @@ class AlexaEndpointConnectorImpl extends AbstractIotShadowEndpoint<EndpointState
         await this.completeDeltaSettings(deltaId);
     }
 
-    async completeDeltaState(deltaId: symbol) {
-        await this.waitDeltaPromises(deltaId);
-        this.publishReportedState(this.deltaEndpointsState.get(deltaId))
-        this.deltaEndpointsState.delete(deltaId);
-    }
     async completeDeltaSettings(deltaId: symbol) {
         await this.waitDeltaPromises(deltaId);
         await this.publishSettings(this.deltaEndpointSettings.get(deltaId));
