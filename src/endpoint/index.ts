@@ -57,6 +57,11 @@ export interface AlexaEndpointConnector extends IotShadowEndpoint<AlexaEndpoint>
      */
     alexaStateEmitter: AlexaStateEmitter
     /**
+     * Listens for refresh events
+     * @param listener listener to emit messages
+     */
+    listenRefreshEvents(listener: InfoEmitter | StateEmitter | CapabilityEmitter):void
+    /**
      * Registers a directive handler for this endpoint
      * Automatically attaches the any listeners for refresh events
      * @param namespace directive namespace
@@ -129,14 +134,19 @@ class AlexaEndpointConnectorImpl extends AbstractIotShadowEndpoint<EndpointState
         this.verifyMqttSubscription(directive)
     }
 
-    registerDirectiveHandler<NS extends keyof DirectiveHandlers>(namespace: NS, directiveHandler: SubType<DirectiveHandlers, NS>): void {
-        this.directiveHandlers[namespace] = directiveHandler;
-        // Listen for refresh requests if interfaces are implemented
+    public listenRefreshEvents(listener: InfoEmitter | StateEmitter | CapabilityEmitter) {
         ['refreshState', 'refreshCapability', 'refreshInfo'].forEach((value => {
-            if (directiveHandler[value]) {
-                this.on(value, directiveHandler[value].bind(directiveHandler))
+            if (listener[value]) {
+                this.on(value, listener[value].bind(listener))
             }
         }))
+    }
+
+    registerDirectiveHandler<NS extends keyof DirectiveHandlers>(namespace: NS, directiveHandler: SubType<DirectiveHandlers, NS>): void {
+        this.directiveHandlers[namespace] = directiveHandler;
+        if (directiveHandler['refreshState'] || directiveHandler['refreshCapability'] || directiveHandler['refreshInfo']) {
+            this.listenRefreshEvents(<any>directiveHandler)
+        }
     }
     private getDeltaSettings(deltaId: symbol) {
         let deltaEndpoint = this.deltaEndpointSettings.get(deltaId);
