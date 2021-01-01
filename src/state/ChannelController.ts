@@ -6,7 +6,7 @@ import { DirectiveHandlers } from "../directive";
 type StateInterface = ChannelController.NamespaceType
 class StateHandler implements EndpointStateHandler<StateInterface, StateInterface>{
     readonly directiveName = ChannelController.namespace
-    async handleState(handler: DirectiveHandlers[StateInterface], desiredState: EndpointState[StateInterface]) {
+    async handleState(handler: DirectiveHandlers[StateInterface], desiredState: EndpointState[StateInterface], currentState: EndpointState) {
         if (desiredState.channel) {
             await handler.ChangeChannel(<ChannelController.ChangeChannelRequest>desiredState);
         }

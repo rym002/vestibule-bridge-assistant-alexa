@@ -1,10 +1,10 @@
-import { SeekController } from '@vestibule-link/alexa-video-skill-types';
+import { PlaybackController, PlaybackStateReporter, PowerController, RecordController, SeekController } from '@vestibule-link/alexa-video-skill-types';
 import { serviceProviderManager } from '@vestibule-link/bridge-service-provider';
 import * as iot from '@vestibule-link/bridge-gateway-aws/dist/iot';
 import { EndpointInfo, EndpointState, endpointTopicPrefix, RequestMessage, SubType } from '@vestibule-link/iot-types';
 import { iotshadow, mqtt } from 'aws-iot-device-sdk-v2';
 import 'mocha';
-import { createSandbox, match, SinonSandbox, SinonStub, SinonStubbedInstance, SinonStubbedMember, StubbableType } from 'sinon';
+import Sinon, { createSandbox, match, SinonSandbox, SinonSpy, SinonStub, SinonStubbedInstance, SinonStubbedMember, StubbableType } from 'sinon';
 import { DirectiveHandlers, SupportedDirectives } from '../src/directive';
 import { AlexaEndpointConnector, registerAssistant } from '../src/endpoint';
 import { EventEmitter } from 'events';
@@ -280,12 +280,14 @@ describe('endpoint', () => {
             sandbox.assert.calledWith(connection.publish, topic, JSON.stringify({
                 shadowName: endpointId,
                 thingName: clientId,
-                desired: {
-                    'Alexa.PlaybackStateReporter': null
-                },
-                reported: {
-                    'Alexa.PlaybackStateReporter': {
-                        playbackState: { state: 'PLAYING' }
+                state: {
+                    desired: {
+                        'Alexa.PlaybackStateReporter': null
+                    },
+                    reported: {
+                        'Alexa.PlaybackStateReporter': {
+                            playbackState: { state: 'PLAYING' }
+                        }
                     }
                 }
             }), mqtt.QoS.AtLeastOnce)
@@ -330,6 +332,29 @@ describe('endpoint', () => {
                 sandbox.assert.called(handlerSpy)
             })
         })
+        async function emitCurrentState(context: Mocha.Context, currentState: EndpointState) {
+            const endpointConnector: AlexaEndpointConnector = context.currentTest['connector']
+            const topicHandlerMap = context.currentTest['topicHandlerMap']
+            const acceptedTopic = getShadowAcceptedTopic(endpointConnector.endpointId)
+            const currentStateReq: iotshadow.model.UpdateShadowResponse = {
+                state: {
+                    reported: currentState
+                },
+                version: 1
+            }
+            await emitTopic(topicHandlerMap, acceptedTopic, acceptedTopic, currentStateReq)
+        }
+        async function emitStateDelta(context: Mocha.Context, desiredState: EndpointState) {
+            const topicHandlerMap = context.test['topicHandlerMap']
+            const endpointConnector: AlexaEndpointConnector = context.test['connector']
+
+            const deltaTopic = getShadowDeltaTopic(endpointConnector.endpointId)
+            const deltaReq: iotshadow.model.ShadowDeltaUpdatedEvent = {
+                state: desiredState,
+                version: 2
+            }
+            await emitTopic(topicHandlerMap, deltaTopic, deltaTopic, deltaReq)
+        }
         context('PlaybackStateReporter', () => {
             class DirectiveHandler implements SubType<DirectiveHandlers, 'Alexa.PlaybackController'>{
                 readonly supported: SupportedDirectives<'Alexa.PlaybackController'> = ['Play', 'Pause', 'Stop'];
@@ -380,66 +405,106 @@ describe('endpoint', () => {
                 const endpointConnector: AlexaEndpointConnector = this.currentTest['connector']
                 endpointConnector.registerDirectiveHandler(directiveNamespace, new DirectiveHandler());
             })
-            it('should call Play', async function () {
-                const sandbox = getContextSandbox(this)
-                const topicHandlerMap = this.test['topicHandlerMap']
-                const endpointConnector: AlexaEndpointConnector = this.test['connector']
-                const delegateTopic = getShadowDeltaTopic(endpointConnector.endpointId)
-                const handlerSpy = sandbox.spy(endpointConnector.directiveHandlers[directiveNamespace], 'Play')
-                const state: EndpointState = {
+
+            async function testPlaybackState(context: Mocha.Context, operation: PlaybackController.Operations, desiredPlaybackState: PlaybackStateReporter.States): Promise<SinonSpy> {
+                const sandbox = getContextSandbox(context)
+                const endpointConnector: AlexaEndpointConnector = context.test['connector']
+                const handlerSpy = sandbox.spy(endpointConnector.directiveHandlers[directiveNamespace], operation)
+
+                const desiredState: EndpointState = {
                     [namespace]: {
                         playbackState: {
-                            state: 'PLAYING'
+                            state: desiredPlaybackState
                         }
                     }
                 }
-                const req: iotshadow.model.ShadowDeltaUpdatedEvent = {
-                    state: state,
-                    version: 1
-                }
-                await emitTopic(topicHandlerMap, delegateTopic, delegateTopic, req)
-                sandbox.assert.called(handlerSpy)
+                await emitStateDelta(context, desiredState)
+                return handlerSpy
+            }
+            context('Current PLAYING', () => {
+                beforeEach(async function () {
+                    const currentState: EndpointState = {
+                        [namespace]: {
+                            playbackState: {
+                                state: 'PLAYING'
+                            }
+                        }
+                    }
+                    await emitCurrentState(this, currentState)
+                })
+                it('PAUSED should call Pause when PLAYING', async function () {
+                    const handlerSpy = await testPlaybackState(this, 'Pause', 'PAUSED')
+                    const sandbox = getContextSandbox(this)
+                    sandbox.assert.called(handlerSpy)
+                })
+
+                it('STOPPED should call Stop when PLAYING', async function () {
+                    const handlerSpy = await testPlaybackState(this, 'Pause', 'PAUSED')
+                    const sandbox = getContextSandbox(this)
+                    sandbox.assert.called(handlerSpy)
+                })
+                it('PLAYING Should not call Play when PLAYING', async function () {
+                    const handlerSpy = await testPlaybackState(this, 'Play', 'PLAYING')
+                    const sandbox = getContextSandbox(this)
+                    sandbox.assert.notCalled(handlerSpy)
+                })
+
             })
 
-            it('should call Pause', async function () {
-                const sandbox = getContextSandbox(this)
-                const topicHandlerMap = this.test['topicHandlerMap']
-                const endpointConnector: AlexaEndpointConnector = this.test['connector']
-                const delegateTopic = getShadowDeltaTopic(endpointConnector.endpointId)
-                const handlerSpy = sandbox.spy(endpointConnector.directiveHandlers[directiveNamespace], 'Pause')
-                const state: EndpointState = {
-                    [namespace]: {
-                        playbackState: {
-                            state: 'PAUSED'
+            context('Current PAUSED', () => {
+                beforeEach(async function () {
+                    const currentState: EndpointState = {
+                        [namespace]: {
+                            playbackState: {
+                                state: 'PAUSED'
+                            }
                         }
                     }
-                }
-                const req: iotshadow.model.ShadowDeltaUpdatedEvent = {
-                    state: state,
-                    version: 1
-                }
-                await emitTopic(topicHandlerMap, delegateTopic, delegateTopic, req)
-                sandbox.assert.called(handlerSpy)
+                    await emitCurrentState(this, currentState)
+                })
+                it('PAUSED should not call Pause when PAUSED', async function () {
+                    const handlerSpy = await testPlaybackState(this, 'Pause', 'PAUSED')
+                    const sandbox = getContextSandbox(this)
+                    sandbox.assert.notCalled(handlerSpy)
+                })
+                it('STOPPED should call Stop when PAUSED', async function () {
+                    const handlerSpy = await testPlaybackState(this, 'Stop', 'STOPPED')
+                    const sandbox = getContextSandbox(this)
+                    sandbox.assert.called(handlerSpy)
+                })
+                it('PLAYING should call Play when PAUSED', async function () {
+                    const handlerSpy = await testPlaybackState(this, 'Play', 'PLAYING')
+                    const sandbox = getContextSandbox(this)
+                    sandbox.assert.called(handlerSpy)
+                })
+
             })
-            it('should call Stop', async function () {
-                const sandbox = getContextSandbox(this)
-                const topicHandlerMap = this.test['topicHandlerMap']
-                const endpointConnector: AlexaEndpointConnector = this.test['connector']
-                const delegateTopic = getShadowDeltaTopic(endpointConnector.endpointId)
-                const handlerSpy = sandbox.spy(endpointConnector.directiveHandlers[directiveNamespace], 'Stop')
-                const state: EndpointState = {
-                    [namespace]: {
-                        playbackState: {
-                            state: 'STOPPED'
+            context('Current STOPPED', () => {
+                beforeEach(async function () {
+                    const currentState: EndpointState = {
+                        [namespace]: {
+                            playbackState: {
+                                state: 'STOPPED'
+                            }
                         }
                     }
-                }
-                const req: iotshadow.model.ShadowDeltaUpdatedEvent = {
-                    state: state,
-                    version: 1
-                }
-                await emitTopic(topicHandlerMap, delegateTopic, delegateTopic, req)
-                sandbox.assert.called(handlerSpy)
+                    await emitCurrentState(this, currentState)
+                })
+                it('STOPPED should not call Stop when STOPPED', async function () {
+                    const handlerSpy = await testPlaybackState(this, 'Stop', 'STOPPED')
+                    const sandbox = getContextSandbox(this)
+                    sandbox.assert.notCalled(handlerSpy)
+                })
+                it('PLAYING should not call Play when STOPPED', async function () {
+                    const handlerSpy = await testPlaybackState(this, 'Play', 'PLAYING')
+                    const sandbox = getContextSandbox(this)
+                    sandbox.assert.notCalled(handlerSpy)
+                })
+                it('PAUSED should not call Pause when STOPPED', async function () {
+                    const handlerSpy = await testPlaybackState(this, 'Pause', 'PAUSED')
+                    const sandbox = getContextSandbox(this)
+                    sandbox.assert.notCalled(handlerSpy)
+                })
             })
         })
         context('PowerController', () => {
@@ -457,47 +522,67 @@ describe('endpoint', () => {
                 }
             }
             const namespace = 'Alexa.PowerController'
+            async function testPowerController(context: Mocha.Context, operation: PowerController.Operations, desiredPowerState: PowerController.States): Promise<SinonSpy> {
+                const sandbox = getContextSandbox(context)
+                const endpointConnector: AlexaEndpointConnector = context.test['connector']
+                const handlerSpy = sandbox.spy(endpointConnector.directiveHandlers[namespace], operation)
+
+                const desiredState: EndpointState = {
+                    [namespace]: {
+                        powerState: desiredPowerState
+                    }
+                }
+                await emitStateDelta(context, desiredState)
+                return handlerSpy
+            }
             beforeEach(async function () {
                 const endpointConnector: AlexaEndpointConnector = this.currentTest['connector']
                 endpointConnector.registerDirectiveHandler(namespace, new DirectiveHandler());
             })
-            it('should call TurnOff', async function () {
-                const sandbox = getContextSandbox(this)
-                const topicHandlerMap = this.test['topicHandlerMap']
-                const endpointConnector: AlexaEndpointConnector = this.test['connector']
-                const delegateTopic = getShadowDeltaTopic(endpointConnector.endpointId)
-                const handlerSpy = sandbox.spy(endpointConnector.directiveHandlers[namespace], 'TurnOff')
-                const state: EndpointState = {
-                    [namespace]: {
-                        powerState: 'OFF'
+            context('Current ON', () => {
+                beforeEach(async function () {
+                    const currentState: EndpointState = {
+                        [namespace]: {
+                            powerState: 'ON'
+                        }
                     }
-                }
-                const req: iotshadow.model.ShadowDeltaUpdatedEvent = {
-                    state: state,
-                    version: 1
-                }
-                await emitTopic(topicHandlerMap, delegateTopic, delegateTopic, req)
-                sandbox.assert.called(handlerSpy)
-            })
-            it('should call TurnOn', async function () {
-                const sandbox = getContextSandbox(this)
-                const topicHandlerMap = this.test['topicHandlerMap']
-                const endpointConnector: AlexaEndpointConnector = this.test['connector']
-                const delegateTopic = getShadowDeltaTopic(endpointConnector.endpointId)
-                const handlerSpy = sandbox.spy(endpointConnector.directiveHandlers[namespace], 'TurnOn')
-                const state: EndpointState = {
-                    [namespace]: {
-                        powerState: 'ON'
-                    }
-                }
-                const req: iotshadow.model.ShadowDeltaUpdatedEvent = {
-                    state: state,
-                    version: 1
-                }
-                await emitTopic(topicHandlerMap, delegateTopic, delegateTopic, req)
-                sandbox.assert.called(handlerSpy)
-            })
+                    await emitCurrentState(this, currentState)
+                })
 
+                it('ON Should not call TurnOn when ON', async function () {
+                    const handlerSpy = await testPowerController(this, 'TurnOn', 'ON')
+                    const sandbox = getContextSandbox(this)
+                    sandbox.assert.notCalled(handlerSpy)
+                })
+
+                it('OFF Should call TurnOff when ON', async function () {
+                    const handlerSpy = await testPowerController(this, 'TurnOff', 'OFF')
+                    const sandbox = getContextSandbox(this)
+                    sandbox.assert.called(handlerSpy)
+                })
+            })
+            context('Current OFF', () => {
+                beforeEach(async function () {
+                    const currentState: EndpointState = {
+                        [namespace]: {
+                            powerState: 'OFF'
+                        }
+                    }
+                    await emitCurrentState(this, currentState)
+                })
+
+                it('ON Should call TurnOn when OFF', async function () {
+                    const handlerSpy = await testPowerController(this, 'TurnOn', 'ON')
+                    const sandbox = getContextSandbox(this)
+                    sandbox.assert.called(handlerSpy)
+                })
+
+                it('OFF Should not call TurnOff when OFF', async function () {
+                    const handlerSpy = await testPowerController(this, 'TurnOff', 'OFF')
+                    const sandbox = getContextSandbox(this)
+                    sandbox.assert.notCalled(handlerSpy)
+                })
+            })
         })
         context('RecordController', () => {
             class DirectiveHandler implements SubType<DirectiveHandlers, 'Alexa.RecordController'>{
@@ -514,47 +599,190 @@ describe('endpoint', () => {
                 }
             }
             const namespace = 'Alexa.RecordController'
+            async function testRecordController(context: Mocha.Context, operation: RecordController.Operations, desiredRecordState: RecordController.States): Promise<SinonSpy> {
+                const sandbox = getContextSandbox(context)
+                const endpointConnector: AlexaEndpointConnector = context.test['connector']
+                const handlerSpy = sandbox.spy(endpointConnector.directiveHandlers[namespace], operation)
+
+                const desiredState: EndpointState = {
+                    [namespace]: {
+                        RecordingState: desiredRecordState
+                    }
+                }
+                await emitStateDelta(context, desiredState)
+                return handlerSpy
+            }
             beforeEach(async function () {
                 const endpointConnector: AlexaEndpointConnector = this.currentTest['connector']
                 endpointConnector.registerDirectiveHandler(namespace, new DirectiveHandler());
             })
-            it('should call StartRecording', async function () {
-                const sandbox = getContextSandbox(this)
-                const topicHandlerMap = this.test['topicHandlerMap']
-                const endpointConnector: AlexaEndpointConnector = this.test['connector']
-                const delegateTopic = getShadowDeltaTopic(endpointConnector.endpointId)
-                const handlerSpy = sandbox.spy(endpointConnector.directiveHandlers[namespace], 'StartRecording')
-                const state: EndpointState = {
-                    [namespace]: {
-                        RecordingState: 'RECORDING'
-                    }
-                }
-                const req: iotshadow.model.ShadowDeltaUpdatedEvent = {
-                    state: state,
-                    version: 1
-                }
-                await emitTopic(topicHandlerMap, delegateTopic, delegateTopic, req)
-                sandbox.assert.called(handlerSpy)
-            })
-            it('should call StopRecording', async function () {
-                const sandbox = getContextSandbox(this)
-                const topicHandlerMap = this.test['topicHandlerMap']
-                const endpointConnector: AlexaEndpointConnector = this.test['connector']
-                const delegateTopic = getShadowDeltaTopic(endpointConnector.endpointId)
-                const handlerSpy = sandbox.spy(endpointConnector.directiveHandlers[namespace], 'StopRecording')
-                const state: EndpointState = {
-                    [namespace]: {
-                        RecordingState: 'NOT_RECORDING'
-                    }
-                }
-                const req: iotshadow.model.ShadowDeltaUpdatedEvent = {
-                    state: state,
-                    version: 1
-                }
-                await emitTopic(topicHandlerMap, delegateTopic, delegateTopic, req)
-                sandbox.assert.called(handlerSpy)
-            })
 
+            context('Current RECORDING', () => {
+                context('Current PLAYING', () => {
+                    beforeEach(async function () {
+                        const currentState: EndpointState = {
+                            [namespace]: {
+                                RecordingState: 'RECORDING'
+                            },
+                            "Alexa.PlaybackStateReporter": {
+                                playbackState: {
+                                    state: 'PLAYING'
+                                }
+                            }
+                        }
+                        await emitCurrentState(this, currentState)
+                    })
+
+                    it('RECORDING Should not call StartRecording when RECORDING and PLAYING', async function () {
+                        const handlerSpy = await testRecordController(this, 'StartRecording', 'RECORDING')
+                        const sandbox = getContextSandbox(this)
+                        sandbox.assert.notCalled(handlerSpy)
+                    })
+
+                    it('NOT_RECORDING Should call StopRecording when RECORDING and PLAYING', async function () {
+                        const handlerSpy = await testRecordController(this, 'StopRecording', 'NOT_RECORDING')
+                        const sandbox = getContextSandbox(this)
+                        sandbox.assert.called(handlerSpy)
+                    })
+                })
+                context('Current PAUSED', () => {
+                    beforeEach(async function () {
+                        const currentState: EndpointState = {
+                            [namespace]: {
+                                RecordingState: 'RECORDING'
+                            },
+                            "Alexa.PlaybackStateReporter": {
+                                playbackState: {
+                                    state: 'PAUSED'
+                                }
+                            }
+                        }
+                        await emitCurrentState(this, currentState)
+                    })
+
+                    it('RECORDING Should not call StartRecording when RECORDING and PAUSED', async function () {
+                        const handlerSpy = await testRecordController(this, 'StartRecording', 'RECORDING')
+                        const sandbox = getContextSandbox(this)
+                        sandbox.assert.notCalled(handlerSpy)
+                    })
+
+                    it('NOT_RECORDING Should call StopRecording when RECORDING and PAUSED', async function () {
+                        const handlerSpy = await testRecordController(this, 'StopRecording', 'NOT_RECORDING')
+                        const sandbox = getContextSandbox(this)
+                        sandbox.assert.called(handlerSpy)
+                    })
+                })
+                context('Current STOPPED', () => {
+                    beforeEach(async function () {
+                        const currentState: EndpointState = {
+                            [namespace]: {
+                                RecordingState: 'RECORDING'
+                            },
+                            "Alexa.PlaybackStateReporter": {
+                                playbackState: {
+                                    state: 'STOPPED'
+                                }
+                            }
+                        }
+                        await emitCurrentState(this, currentState)
+                    })
+
+                    it('RECORDING Should not call StartRecording when RECORDING and STOPPED', async function () {
+                        const handlerSpy = await testRecordController(this, 'StartRecording', 'RECORDING')
+                        const sandbox = getContextSandbox(this)
+                        sandbox.assert.notCalled(handlerSpy)
+                    })
+
+                    it('NOT_RECORDING Should call StopRecording when RECORDING and STOPPED', async function () {
+                        const handlerSpy = await testRecordController(this, 'StopRecording', 'NOT_RECORDING')
+                        const sandbox = getContextSandbox(this)
+                        sandbox.assert.called(handlerSpy)
+                    })
+                })
+            })
+            context('Current NOT_RECORDING', () => {
+                context('Current PLAYING', () => {
+                    beforeEach(async function () {
+                        const currentState: EndpointState = {
+                            [namespace]: {
+                                RecordingState: 'NOT_RECORDING'
+                            },
+                            "Alexa.PlaybackStateReporter": {
+                                playbackState: {
+                                    state: 'PLAYING'
+                                }
+                            }
+                        }
+                        await emitCurrentState(this, currentState)
+                    })
+
+                    it('RECORDING Should call StartRecording when NOT_RECORDING and PLAYING', async function () {
+                        const handlerSpy = await testRecordController(this, 'StartRecording', 'RECORDING')
+                        const sandbox = getContextSandbox(this)
+                        sandbox.assert.called(handlerSpy)
+                    })
+
+                    it('NOT_RECORDING Should not call StopRecording when NOT_RECORDING and PLAYING', async function () {
+                        const handlerSpy = await testRecordController(this, 'StopRecording', 'NOT_RECORDING')
+                        const sandbox = getContextSandbox(this)
+                        sandbox.assert.notCalled(handlerSpy)
+                    })
+                })
+                context('Current PAUSED', () => {
+                    beforeEach(async function () {
+                        const currentState: EndpointState = {
+                            [namespace]: {
+                                RecordingState: 'NOT_RECORDING'
+                            },
+                            "Alexa.PlaybackStateReporter": {
+                                playbackState: {
+                                    state: 'PAUSED'
+                                }
+                            }
+                        }
+                        await emitCurrentState(this, currentState)
+                    })
+
+                    it('RECORDING Should call StartRecording when NOT_RECORDING and PAUSED', async function () {
+                        const handlerSpy = await testRecordController(this, 'StartRecording', 'RECORDING')
+                        const sandbox = getContextSandbox(this)
+                        sandbox.assert.called(handlerSpy)
+                    })
+
+                    it('NOT_RECORDING Should not call StopRecording when NOT_RECORDING and PAUSED', async function () {
+                        const handlerSpy = await testRecordController(this, 'StopRecording', 'NOT_RECORDING')
+                        const sandbox = getContextSandbox(this)
+                        sandbox.assert.notCalled(handlerSpy)
+                    })
+                })
+                context('Current STOPPED', () => {
+                    beforeEach(async function () {
+                        const currentState: EndpointState = {
+                            [namespace]: {
+                                RecordingState: 'NOT_RECORDING'
+                            },
+                            "Alexa.PlaybackStateReporter": {
+                                playbackState: {
+                                    state: 'STOPPED'
+                                }
+                            }
+                        }
+                        await emitCurrentState(this, currentState)
+                    })
+
+                    it('RECORDING Should not call StartRecording when NOT_RECORDING and STOPPED', async function () {
+                        const handlerSpy = await testRecordController(this, 'StartRecording', 'RECORDING')
+                        const sandbox = getContextSandbox(this)
+                        sandbox.assert.notCalled(handlerSpy)
+                    })
+
+                    it('NOT_RECORDING Should not call StopRecording when NOT_RECORDING and STOPPED', async function () {
+                        const handlerSpy = await testRecordController(this, 'StopRecording', 'NOT_RECORDING')
+                        const sandbox = getContextSandbox(this)
+                        sandbox.assert.notCalled(handlerSpy)
+                    })
+                })
+            })
         })
     })
     context('settings', () => {
@@ -608,4 +836,8 @@ function getDirectiveTopicBase(endpointId: string) {
 
 function getShadowDeltaTopic(endpointId: string) {
     return `$aws/things/${clientId}/shadow/name/${endpointId}/update/delta`
+}
+
+function getShadowAcceptedTopic(endpointId: string) {
+    return `$aws/things/${clientId}/shadow/name/${endpointId}/update/accepted`
 }

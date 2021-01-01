@@ -11,7 +11,7 @@ import recordController from './RecordController';
 
 export interface EndpointStateHandler<DT extends Directive.Namespaces, ST extends keyof EndpointState> {
     readonly directiveName: DT
-    handleState: (handler: SubType<DirectiveHandlers, DT>, desiredState: EndpointState[ST]) => Promise<void>
+    handleState: (handler: SubType<DirectiveHandlers, DT>, desiredState: EndpointState[ST], currentState: EndpointState) => Promise<void>
 }
 
 type EndpointStateHandlers = {
@@ -23,13 +23,13 @@ const stateHandlers: EndpointStateHandlers = {
     'Alexa.PowerController': powerController,
     'Alexa.RecordController': recordController
 }
-export async function routeStateDelta(endpointDesiredState: EndpointState, directiveHandlers: DirectiveHandlers): Promise<void> {
+export async function routeStateDelta(endpointDesiredState: EndpointState, directiveHandlers: DirectiveHandlers, currentState: EndpointState): Promise<void> {
     const promises = map(endpointDesiredState, async (desiredState, stateId: keyof EndpointState) => {
-        const stateHandler = stateHandlers[stateId];
+        const stateHandler = stateHandlers[stateId];        
         if (stateHandler) {
             const directiveHandler = directiveHandlers[stateHandler.directiveName]
             if (directiveHandler) {
-                await stateHandler.handleState(directiveHandler, desiredState)
+                await stateHandler.handleState(directiveHandler, desiredState, currentState)
             } else {
                 const error: ErrorHolder = {
                     errorType: 'Alexa',

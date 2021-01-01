@@ -60,7 +60,7 @@ export interface AlexaEndpointConnector extends IotShadowEndpoint<AlexaEndpoint>
      * Listens for refresh events
      * @param listener listener to emit messages
      */
-    listenRefreshEvents(listener: InfoEmitter | StateEmitter | CapabilityEmitter):void
+    listenRefreshEvents(listener: InfoEmitter | StateEmitter | CapabilityEmitter): void
     /**
      * Registers a directive handler for this endpoint
      * Automatically attaches the any listeners for refresh events
@@ -190,8 +190,10 @@ class AlexaEndpointConnectorImpl extends AbstractIotShadowEndpoint<EndpointState
         this.deltaEndpointSettings.delete(deltaId);
     }
 
-    private async publishSettings(settings: EndpointSettings) {
-        await awsConnection().publish(this.settingsTopic, settings, mqtt.QoS.AtMostOnce)
+    private async publishSettings(settings?: EndpointSettings) {
+        if (settings) {
+            await awsConnection().publish(this.settingsTopic, settings, mqtt.QoS.AtMostOnce)
+        }
     }
 
 
@@ -226,7 +228,7 @@ class AlexaEndpointConnectorImpl extends AbstractIotShadowEndpoint<EndpointState
     }
 
     protected async handleDeltaState(state: EndpointState): Promise<void> {
-        await routeStateDelta(state, this.directiveHandlers)
+        await routeStateDelta(state, this.directiveHandlers, this.reportedState)
     }
 
     private sendResponse(req: RequestMessage<any>, resp: ResponseMessage<any>, startTime: number): void {
