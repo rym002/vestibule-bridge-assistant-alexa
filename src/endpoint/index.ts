@@ -1,11 +1,11 @@
-import { AlexaEndpoint, EndpointState, SubType, EndpointInfo, EndpointCapability, ErrorHolder, ResponseMessage, endpointTopicPrefix, RequestMessage } from '@vestibule-link/iot-types';
-import { DirectiveHandlers, DirectiveRequest } from '../directive';
+import { AbstractIotShadowEndpoint, awsConnection, IotShadowEndpoint } from '@vestibule-link/bridge-gateway-aws';
+import { ServiceProviderEndpointFactory, serviceProviderManager } from '@vestibule-link/bridge-service-provider';
+import { AlexaEndpoint, EndpointCapability, EndpointInfo, EndpointState, endpointTopicPrefix, ErrorHolder, RequestMessage, ResponseMessage, SubType } from '@vestibule-link/iot-types';
+import { mqtt } from 'aws-iot-device-sdk-v2';
 import { EventEmitter } from 'events';
 import { merge } from 'lodash';
+import { DirectiveCommand, DirectiveCommands, DirectiveHandlers } from '../directive';
 import { routeStateDelta } from '../state';
-import { IotShadowEndpoint, awsConnection, AbstractIotShadowEndpoint } from '@vestibule-link/bridge-gateway-aws';
-import { mqtt } from 'aws-iot-device-sdk-v2';
-import { serviceProviderManager, ServiceProviderEndpointFactory } from '@vestibule-link/bridge-service-provider'
 
 declare module '@vestibule-link/bridge-service-provider/dist/providers' {
     export interface ServiceProviderConnectors {
@@ -67,7 +67,7 @@ export interface AlexaEndpointConnector extends IotShadowEndpoint<AlexaEndpoint>
      * @param namespace directive namespace
      * @param directiveHandler directive handler for namespace
      */
-    registerDirectiveHandler<NS extends keyof DirectiveHandlers>(namespace: NS, directiveHandler: SubType<DirectiveHandlers, NS>): void;
+    registerDirectiveHandler<NS extends keyof DirectiveHandlers>(namespace: NS, directiveHandler: SubType<DirectiveHandlers, NS>): Promise<void>;
     /**
      * Indicates all changes have been sent
      * Connector should update the endpoint settings based on deltaId
@@ -127,13 +127,6 @@ class AlexaEndpointConnectorImpl extends AbstractIotShadowEndpoint<EndpointState
         return endpointTopicPrefix(this.namedShadowRequest.thingName, 'alexa', this.endpointId)
     }
 
-    async subscribeMessages() {
-        await super.subscribeMessages()
-        const directiveTopic = this.topicPrefix + 'directive/#'
-        const directive = await awsConnection().subscribe(directiveTopic, mqtt.QoS.AtMostOnce, this.directiveHandler.bind(this))
-        this.verifyMqttSubscription(directive)
-    }
-
     public listenRefreshEvents(listener: InfoEmitter | StateEmitter | CapabilityEmitter) {
         ['refreshState', 'refreshCapability', 'refreshInfo'].forEach((value => {
             if (listener[value]) {
@@ -142,11 +135,57 @@ class AlexaEndpointConnectorImpl extends AbstractIotShadowEndpoint<EndpointState
         }))
     }
 
-    registerDirectiveHandler<NS extends keyof DirectiveHandlers>(namespace: NS, directiveHandler: SubType<DirectiveHandlers, NS>): void {
+    private subscribeDirectiveCommand<NS extends keyof DirectiveHandlers, N extends DirectiveCommands<NS>>(command: DirectiveCommand<NS, N>) {
+        return async (topic: string, payload: ArrayBuffer) => {
+            const start = Date.now()
+            const json = this.decoder.decode(payload)
+            const req: RequestMessage<any> = JSON.parse(json)
+            const commandReq = req.payload
+            let resp: ResponseMessage<any>
+            try {
+                const respPayload = await command(commandReq)
+                resp = {
+                    payload: respPayload.payload,
+                    stateChange: respPayload.state,
+                    error: false
+                }
+            } catch (err) {
+                let errorHolder: ErrorHolder
+                if (err.errorType) {
+                    errorHolder = err
+                } else {
+                    errorHolder = {
+                        errorType: 'Alexa',
+                        errorPayload: {
+                            type: 'INTERNAL_ERROR',
+                            message: err.message
+                        }
+                    }
+                }
+                resp = {
+                    error: true,
+                    payload: errorHolder
+                }
+            }
+            this.sendResponse(req, resp, start)
+        }
+    }
+    async registerDirectiveHandler<NS extends keyof DirectiveHandlers>(namespace: NS, directiveHandler: SubType<DirectiveHandlers, NS>): Promise<void> {
         this.directiveHandlers[namespace] = directiveHandler;
         if (directiveHandler['refreshState'] || directiveHandler['refreshCapability'] || directiveHandler['refreshInfo']) {
             this.listenRefreshEvents(<any>directiveHandler)
         }
+        const supported: string[] = directiveHandler.supported
+        const directiveSubscriptionPromises = supported.map(name => {
+            const directiveTopic = `${this.topicPrefix}directive/${namespace}/${name}`
+            const directiveCommand = directiveHandler[name]
+            const on_message = this.subscribeDirectiveCommand<NS,any>(directiveCommand)
+            return awsConnection().subscribe(directiveTopic, mqtt.QoS.AtMostOnce, on_message.bind(this))
+        })
+        const directiveSubscriptions = await Promise.all(directiveSubscriptionPromises)
+        directiveSubscriptions.forEach(subscription => {
+            this.verifyMqttSubscription(subscription)
+        })
     }
     private getDeltaSettings(deltaId: symbol) {
         let deltaEndpoint = this.deltaEndpointSettings.get(deltaId);
@@ -196,37 +235,6 @@ class AlexaEndpointConnectorImpl extends AbstractIotShadowEndpoint<EndpointState
         }
     }
 
-
-    private async directiveHandler(topic: string, payload: ArrayBuffer) {
-        const start = Date.now()
-        const parts = topic.split('/');
-        const [root, clientId, assistant, endpoint, endpointId, command, ...directiveArgs] = [...parts];
-        const json = this.decoder.decode(payload)
-        const req: RequestMessage<any> = JSON.parse(json)
-        let resp: ResponseMessage<any>
-        try {
-            resp = await this.delegateDirective(directiveArgs, req.payload)
-        } catch (err) {
-            let errorHolder: ErrorHolder
-            if (err.errorType) {
-                errorHolder = err
-            } else {
-                errorHolder = {
-                    errorType: 'Alexa',
-                    errorPayload: {
-                        type: 'INTERNAL_ERROR',
-                        message: err.message
-                    }
-                }
-            }
-            resp = {
-                error: true,
-                payload: errorHolder
-            }
-        }
-        this.sendResponse(req, resp, start)
-    }
-
     protected async handleDeltaState(state: EndpointState): Promise<void> {
         await routeStateDelta(state, this.directiveHandlers, this.reportedState)
     }
@@ -250,43 +258,6 @@ class AlexaEndpointConnectorImpl extends AbstractIotShadowEndpoint<EndpointState
         }
         if (replyTopic) {
             awsConnection().publish(replyTopic, resp, mqtt.QoS.AtMostOnce, false)
-        }
-    }
-    private async delegateDirective<NS extends keyof DirectiveHandlers, N extends keyof DirectiveHandlers[NS]>(commandArgs: string[], request: any): Promise<ResponseMessage<any>> {
-        const [namespaceValue, nameValue] = [...commandArgs];
-        const namespace = <NS>namespaceValue;
-        const name = <N>nameValue;
-        const directiveHandler = this.directiveHandlers[namespace];
-        if (directiveHandler) {
-            const supported: string[] = directiveHandler.supported;
-            if (supported.indexOf(nameValue) >= 0) {
-                const handleFunction = <Function><unknown>directiveHandler[name];
-                const respPayload = await handleFunction.bind(directiveHandler)(request);
-                const resp: ResponseMessage<any> = {
-                    payload: respPayload.payload,
-                    stateChange: respPayload.state,
-                    error: false
-                }
-                return resp
-            } else {
-                const error: ErrorHolder = {
-                    errorType: 'Alexa',
-                    errorPayload: {
-                        type: 'NOT_SUPPORTED_IN_CURRENT_MODE',
-                        message: `Not supported command: ${namespace}:${nameValue}`
-                    }
-                }
-                throw error
-            }
-        } else {
-            const error: ErrorHolder = {
-                errorType: 'Alexa',
-                errorPayload: {
-                    type: 'INVALID_DIRECTIVE',
-                    message: `Directive Handler Not Found: ${namespace}`
-                }
-            }
-            throw error
         }
     }
 }

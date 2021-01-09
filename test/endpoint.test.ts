@@ -104,7 +104,7 @@ describe('endpoint', () => {
             const directiveSpy = sandbox.spy(directiveHandler, 'AdjustSeekPosition');
             const namespace = 'Alexa.SeekController'
             const name = 'AdjustSeekPosition'
-            endpointConnector.registerDirectiveHandler(namespace, directiveHandler);
+            await endpointConnector.registerDirectiveHandler(namespace, directiveHandler);
             const topicBase = getDirectiveTopicBase(endpointId)
             const req: RequestMessage<any> = {
                 payload: {
@@ -114,7 +114,8 @@ describe('endpoint', () => {
                     sync: `testResponse/${endpointId}`
                 }
             }
-            const resp = await emitTopic(topicHandlerMap, `${topicBase}#`, `${topicBase}${namespace}/${name}`, req)
+            const topicName = `${topicBase}${namespace}/${name}`
+            const resp = await emitTopic(topicHandlerMap, topicName, topicName, req)
             sandbox.assert.calledWith(directiveSpy, req.payload)
             sandbox.assert.calledWith(connection.publish, req.replyTopic.sync, match.object, mqtt.QoS.AtMostOnce)
         })
@@ -127,7 +128,7 @@ describe('endpoint', () => {
             const directiveSpy = sandbox.spy(directiveHandler, 'AdjustSeekPosition');
             const namespace = 'Alexa.SeekController'
             const name = 'AdjustSeekPosition'
-            endpointConnector.registerDirectiveHandler(namespace, directiveHandler);
+            await endpointConnector.registerDirectiveHandler(namespace, directiveHandler);
             const topicBase = getDirectiveTopicBase(endpointId)
             const req: RequestMessage<any> = {
                 payload: {
@@ -142,7 +143,8 @@ describe('endpoint', () => {
                     deferred: 100
                 }
             }
-            const resp = await emitTopic(topicHandlerMap, `${topicBase}#`, `${topicBase}${namespace}/${name}`, req)
+            const topicName = `${topicBase}${namespace}/${name}`
+            const resp = await emitTopic(topicHandlerMap, topicName, topicName, req)
             sandbox.assert.calledWith(directiveSpy, req.payload)
             sandbox.assert.calledWith(connection.publish, req.replyTopic.sync, match.object, mqtt.QoS.AtMostOnce)
         })
@@ -155,7 +157,7 @@ describe('endpoint', () => {
             const directiveSpy = sandbox.spy(directiveHandler, 'AdjustSeekPosition');
             const namespace = 'Alexa.SeekController'
             const name = 'AdjustSeekPosition'
-            endpointConnector.registerDirectiveHandler(namespace, directiveHandler);
+            await endpointConnector.registerDirectiveHandler(namespace, directiveHandler);
             const topicBase = getDirectiveTopicBase(endpointId)
             const req: RequestMessage<any> = {
                 payload: {
@@ -170,7 +172,8 @@ describe('endpoint', () => {
                     deferred: 0
                 }
             }
-            const resp = await emitTopic(topicHandlerMap, `${topicBase}#`, `${topicBase}${namespace}/${name}`, req)
+            const topicName = `${topicBase}${namespace}/${name}`
+            const resp = await emitTopic(topicHandlerMap, topicName, topicName, req)
             sandbox.assert.calledWith(directiveSpy, req.payload)
             sandbox.assert.calledWith(connection.publish, req.replyTopic.async, match.object, mqtt.QoS.AtMostOnce)
         })
@@ -184,7 +187,7 @@ describe('endpoint', () => {
             const directiveSpy = sandbox.spy(directiveHandler, 'AdjustSeekPosition');
             const namespace = 'Alexa.SeekController'
             const name = 'AdjustSeekPosition'
-            endpointConnector.registerDirectiveHandler(namespace, directiveHandler);
+            await endpointConnector.registerDirectiveHandler(namespace, directiveHandler);
             const topicBase = getDirectiveTopicBase(endpointId)
             const req: RequestMessage<any> = {
                 payload: {
@@ -199,67 +202,9 @@ describe('endpoint', () => {
                     deferred: 0
                 }
             }
-            const resp = await emitTopic(topicHandlerMap, `${topicBase}#`, `${topicBase}${namespace}/${name}`, req)
-            sandbox.assert.calledWith(directiveSpy, req.payload)
+            const topicName = `${topicBase}${namespace}/${name}`
+            const resp = await emitTopic(topicHandlerMap, topicName, topicName, req)
             sandbox.assert.calledOnce(connection.publish)
-        })
-        it('should send error for invalid directive', async function () {
-            const sandbox = getContextSandbox(this)
-            const endpointId = 'testProvider_testDirectiveError'
-            const topicHandlerMap = this.test['topicHandlerMap']
-            const connection: StubbedClass<mqtt.MqttClientConnection> = this.test['connection']
-            const endpointConnector = await serviceProviderManager.getEndpointConnector('alexa', endpointId, true)
-            const topicBase = getDirectiveTopicBase(endpointId)
-            const req: RequestMessage<any> = {
-                payload: {
-                    d: 1
-                },
-                replyTopic: {
-                    sync: `testResponse/${endpointId}`
-                }
-            }
-            const namespace = 'Alexa.SeekController'
-            const resp = await emitTopic(topicHandlerMap, `${topicBase}#`, `${topicBase}${namespace}/AdjustSeekPosition`, req)
-            sandbox.assert.calledWith(connection.publish, req.replyTopic.sync, {
-                error: true,
-                payload: {
-                    errorType: 'Alexa',
-                    errorPayload: {
-                        type: 'INVALID_DIRECTIVE',
-                        message: `Directive Handler Not Found: ${namespace}`
-                    }
-                }
-            }, mqtt.QoS.AtMostOnce)
-        })
-        it('should send error for unsupported operation', async function () {
-            const endpointId = 'testProvider_testDirectiveOperation'
-            const sandbox = getContextSandbox(this)
-            const topicHandlerMap = this.test['topicHandlerMap']
-            const connection: StubbedClass<mqtt.MqttClientConnection> = this.test['connection']
-            const endpointConnector = await serviceProviderManager.getEndpointConnector('alexa', endpointId, true)
-            const topicBase = getDirectiveTopicBase(endpointId)
-            const req: RequestMessage<any> = {
-                payload: {
-                    d: 1
-                },
-                replyTopic: {
-                    sync: `testResponse/${endpointId}`
-                }
-            }
-            const namespace = 'Alexa.RecordController'
-            endpointConnector.registerDirectiveHandler(namespace, new TestRecordDirectiveHandler());
-            const name = 'StopRecording'
-            const resp = await emitTopic(topicHandlerMap, `${topicBase}#`, `${topicBase}${namespace}/${name}`, req)
-            sandbox.assert.calledWith(connection.publish, req.replyTopic.sync, {
-                error: true,
-                payload: {
-                    errorType: 'Alexa',
-                    errorPayload: {
-                        type: 'NOT_SUPPORTED_IN_CURRENT_MODE',
-                        message: `Not supported command: ${namespace}:${name}`
-                    }
-                }
-            }, mqtt.QoS.AtMostOnce)
         })
     })
     context('state', () => {
@@ -309,7 +254,7 @@ describe('endpoint', () => {
             const namespace = 'Alexa.ChannelController'
             beforeEach(async function () {
                 const endpointConnector: AlexaEndpointConnector = this.currentTest['connector']
-                endpointConnector.registerDirectiveHandler(namespace, new DirectiveHandler());
+                await endpointConnector.registerDirectiveHandler(namespace, new DirectiveHandler());
             })
             it('should call ChangeChannel', async function () {
                 const sandbox = getContextSandbox(this)
@@ -403,7 +348,7 @@ describe('endpoint', () => {
             const directiveNamespace = 'Alexa.PlaybackController'
             beforeEach(async function () {
                 const endpointConnector: AlexaEndpointConnector = this.currentTest['connector']
-                endpointConnector.registerDirectiveHandler(directiveNamespace, new DirectiveHandler());
+                await endpointConnector.registerDirectiveHandler(directiveNamespace, new DirectiveHandler());
             })
 
             async function testPlaybackState(context: Mocha.Context, operation: PlaybackController.Operations, desiredPlaybackState: PlaybackStateReporter.States): Promise<SinonSpy> {
@@ -537,7 +482,7 @@ describe('endpoint', () => {
             }
             beforeEach(async function () {
                 const endpointConnector: AlexaEndpointConnector = this.currentTest['connector']
-                endpointConnector.registerDirectiveHandler(namespace, new DirectiveHandler());
+                await endpointConnector.registerDirectiveHandler(namespace, new DirectiveHandler());
             })
             context('Current ON', () => {
                 beforeEach(async function () {
@@ -614,7 +559,7 @@ describe('endpoint', () => {
             }
             beforeEach(async function () {
                 const endpointConnector: AlexaEndpointConnector = this.currentTest['connector']
-                endpointConnector.registerDirectiveHandler(namespace, new DirectiveHandler());
+                await endpointConnector.registerDirectiveHandler(namespace, new DirectiveHandler());
             })
 
             context('Current RECORDING', () => {
