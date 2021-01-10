@@ -145,8 +145,7 @@ class AlexaEndpointConnectorImpl extends AbstractIotShadowEndpoint<EndpointState
             try {
                 const respPayload = await command(commandReq)
                 resp = {
-                    payload: respPayload.payload,
-                    stateChange: respPayload.state,
+                    ...respPayload,
                     error: false
                 }
             } catch (err) {
@@ -179,7 +178,7 @@ class AlexaEndpointConnectorImpl extends AbstractIotShadowEndpoint<EndpointState
         const directiveSubscriptionPromises = supported.map(name => {
             const directiveTopic = `${this.topicPrefix}directive/${namespace}/${name}`
             const directiveCommand = directiveHandler[name]
-            const on_message = this.subscribeDirectiveCommand<NS,any>(directiveCommand)
+            const on_message = this.subscribeDirectiveCommand<NS,any>(directiveCommand.bind(directiveHandler))
             return awsConnection().subscribe(directiveTopic, mqtt.QoS.AtMostOnce, on_message.bind(this))
         })
         const directiveSubscriptions = await Promise.all(directiveSubscriptionPromises)

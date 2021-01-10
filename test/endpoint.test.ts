@@ -15,8 +15,7 @@ type StatelessPayload<T> = {
 }
 class TestDirectiveHandler implements SubType<DirectiveHandlers, 'Alexa.SeekController'>{
     readonly supported: SupportedDirectives<'Alexa.SeekController'> = ['AdjustSeekPosition'];
-    async AdjustSeekPosition(payload: SeekController.RequestPayload): Promise<StatelessPayload<SeekController.ResponsePayload>> {
-
+    public getMockResponse(): StatelessPayload<SeekController.ResponsePayload> {
         return {
             payload: {
                 properties: [{
@@ -25,7 +24,9 @@ class TestDirectiveHandler implements SubType<DirectiveHandlers, 'Alexa.SeekCont
                 }]
             }
         }
-
+    }
+    async AdjustSeekPosition(payload: SeekController.RequestPayload): Promise<StatelessPayload<SeekController.ResponsePayload>> {
+        return this.getMockResponse()
     }
 }
 class TestRecordDirectiveHandler implements SubType<DirectiveHandlers, 'Alexa.RecordController'>{
@@ -117,7 +118,11 @@ describe('endpoint', () => {
             const topicName = `${topicBase}${namespace}/${name}`
             const resp = await emitTopic(topicHandlerMap, topicName, topicName, req)
             sandbox.assert.calledWith(directiveSpy, req.payload)
-            sandbox.assert.calledWith(connection.publish, req.replyTopic.sync, match.object, mqtt.QoS.AtMostOnce)
+            sandbox.assert.calledWith(connection.publish, req.replyTopic.sync, {
+                ...directiveHandler.getMockResponse(),
+                error: false
+            }
+                , mqtt.QoS.AtMostOnce)
         })
         it('should reply on the sync topic when deferred is longer than response time', async function () {
             const sandbox = getContextSandbox(this)
@@ -146,7 +151,10 @@ describe('endpoint', () => {
             const topicName = `${topicBase}${namespace}/${name}`
             const resp = await emitTopic(topicHandlerMap, topicName, topicName, req)
             sandbox.assert.calledWith(directiveSpy, req.payload)
-            sandbox.assert.calledWith(connection.publish, req.replyTopic.sync, match.object, mqtt.QoS.AtMostOnce)
+            sandbox.assert.calledWith(connection.publish, req.replyTopic.sync, {
+                ...directiveHandler.getMockResponse(),
+                error: false
+            }, mqtt.QoS.AtMostOnce)
         })
         it('should reply on the async topic when deferred is shorter than response time', async function () {
             const sandbox = getContextSandbox(this)
@@ -175,7 +183,10 @@ describe('endpoint', () => {
             const topicName = `${topicBase}${namespace}/${name}`
             const resp = await emitTopic(topicHandlerMap, topicName, topicName, req)
             sandbox.assert.calledWith(directiveSpy, req.payload)
-            sandbox.assert.calledWith(connection.publish, req.replyTopic.async, match.object, mqtt.QoS.AtMostOnce)
+            sandbox.assert.calledWith(connection.publish, req.replyTopic.async, {
+                ...directiveHandler.getMockResponse(),
+                error: false
+            }, mqtt.QoS.AtMostOnce)
         })
 
         it('should not reply maxAllowed is shorter than response time', async function () {
