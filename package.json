@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "prepack": "tsc",
-    "test": "mocha -r ts-node/register --extension ts --recursive --exit",
+    "test": "mocha",
     "clean": "rm .npmrc"
   },
   "keywords": [],

@@ -1,13 +1,13 @@
 import { PlaybackController, PlaybackStateReporter, PowerController, RecordController, SeekController } from '@vestibule-link/alexa-video-skill-types';
-import { serviceProviderManager } from '@vestibule-link/bridge-service-provider';
 import * as iot from '@vestibule-link/bridge-gateway-aws/dist/iot';
-import { EndpointInfo, EndpointState, endpointTopicPrefix, RequestMessage, SubType } from '@vestibule-link/iot-types';
+import { serviceProviderManager } from '@vestibule-link/bridge-service-provider';
+import { EndpointState, endpointTopicPrefix, RequestMessage, SubType } from '@vestibule-link/iot-types';
 import { iotshadow, mqtt } from 'aws-iot-device-sdk-v2';
+import { EventEmitter } from 'events';
 import 'mocha';
-import Sinon, { createSandbox, match, SinonSandbox, SinonSpy, SinonStub, SinonStubbedInstance, SinonStubbedMember, StubbableType } from 'sinon';
+import { createSandbox, SinonSandbox, SinonSpy, SinonStub, SinonStubbedInstance, SinonStubbedMember, StubbableType } from 'sinon';
 import { DirectiveHandlers, SupportedDirectives } from '../src/directive';
 import { AlexaEndpointConnector, registerAssistant } from '../src/endpoint';
-import { EventEmitter } from 'events';
 
 
 type StatelessPayload<T> = {
@@ -44,14 +44,14 @@ class TestRecordDirectiveHandler implements SubType<DirectiveHandlers, 'Alexa.Re
 }
 const clientId = 'testClientId'
 interface TopicHandlerMap {
-    [index: string]: (topic: string, payload: ArrayBuffer) => void | Promise<void>
+    [index: string]: (topic: string, payload: ArrayBuffer, dup: boolean, qos: mqtt.QoS, retain: boolean) => void | Promise<void>
 }
 const encoder = new TextEncoder()
 
 async function emitTopic(topicHandlerMap: TopicHandlerMap, listenTopic: string, topic: string, req: any) {
     const topicHandler = topicHandlerMap[listenTopic]
     if (topicHandler) {
-        await topicHandler(topic, encoder.encode(JSON.stringify(req)))
+        await topicHandler(topic, encoder.encode(JSON.stringify(req)), false, mqtt.QoS.AtMostOnce, false)
     } else {
         throw new Error(`Topic Handler not found for ${listenTopic}`)
     }
@@ -231,8 +231,26 @@ describe('endpoint', () => {
             const endpointConnector = await serviceProviderManager.getEndpointConnector('alexa', endpointId, true)
             const deltaId = Symbol()
             endpointConnector.updateState('Alexa.PlaybackStateReporter', 'playbackState', { state: 'PLAYING' }, deltaId);
-            await endpointConnector.completeDeltaState(deltaId);
             const topic = `$aws/things/${clientId}/shadow/name/${endpointId}/update`;
+            const topicHandlerMap = this.test['topicHandlerMap']
+            let clientToken:string
+            process.nextTick(() => {
+                const called = connection.publish.calledWith(topic)
+                if (called) {
+                    const calls = connection.publish.getCalls()
+                    calls.forEach(value => {
+                        if (topic==value.args[0]){
+                            const message = JSON.parse(value.args[1] as string)
+                            clientToken = message.clientToken
+                            const updateTopic = getShadowDocumentsTopic(endpointId)
+                            emitTopic(topicHandlerMap,updateTopic,updateTopic,{
+                                clientToken
+                            })
+                        }
+                    })
+                }
+            })
+            await endpointConnector.completeDeltaState(deltaId);
             sandbox.assert.calledWith(connection.publish, topic, JSON.stringify({
                 shadowName: endpointId,
                 thingName: clientId,
@@ -245,7 +263,8 @@ describe('endpoint', () => {
                             playbackState: { state: 'PLAYING' }
                         }
                     }
-                }
+                },
+                clientToken
             }), mqtt.QoS.AtLeastOnce)
         })
         context('ChannelController', () => {
@@ -291,14 +310,17 @@ describe('endpoint', () => {
         async function emitCurrentState(context: Mocha.Context, currentState: EndpointState) {
             const endpointConnector: AlexaEndpointConnector = context.currentTest['connector']
             const topicHandlerMap = context.currentTest['topicHandlerMap']
-            const acceptedTopic = getShadowAcceptedTopic(endpointConnector.endpointId)
+            const acceptedTopic = getShadowDocumentsTopic(endpointConnector.endpointId)
             const currentStateReq: iotshadow.model.UpdateShadowResponse = {
                 state: {
                     reported: currentState
                 },
                 version: 1
             }
-            await emitTopic(topicHandlerMap, acceptedTopic, acceptedTopic, currentStateReq)
+            const event: iotshadow.model.ShadowUpdatedEvent = {
+                current: currentStateReq
+            }
+            await emitTopic(topicHandlerMap, acceptedTopic, acceptedTopic, event)
         }
         async function emitStateDelta(context: Mocha.Context, desiredState: EndpointState) {
             const topicHandlerMap = context.test['topicHandlerMap']
@@ -794,6 +816,6 @@ function getShadowDeltaTopic(endpointId: string) {
     return `$aws/things/${clientId}/shadow/name/${endpointId}/update/delta`
 }
 
-function getShadowAcceptedTopic(endpointId: string) {
-    return `$aws/things/${clientId}/shadow/name/${endpointId}/update/accepted`
+function getShadowDocumentsTopic(endpointId: string) {
+    return `$aws/things/${clientId}/shadow/name/${endpointId}/update/documents`
 }

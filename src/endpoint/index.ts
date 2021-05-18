@@ -256,7 +256,7 @@ class AlexaEndpointConnectorImpl extends AbstractIotShadowEndpoint<EndpointState
             replyTopic = req.replyTopic.sync;
         }
         if (replyTopic) {
-            awsConnection().publish(replyTopic, resp, mqtt.QoS.AtMostOnce, false)
+            awsConnection().publish(replyTopic, resp as Record<string,any>, mqtt.QoS.AtMostOnce, false)
         }
     }
 }
