@@ -231,27 +231,23 @@ describe('endpoint', () => {
             const endpointConnector = await serviceProviderManager.getEndpointConnector('alexa', endpointId, true)
             const deltaId = Symbol()
             endpointConnector.updateState('Alexa.PlaybackStateReporter', 'playbackState', { state: 'PLAYING' }, deltaId);
-            const topic = `$aws/things/${clientId}/shadow/name/${endpointId}/update`;
+            const updateTopic = `$aws/things/${clientId}/shadow/name/${endpointId}/update`;
             const topicHandlerMap = this.test['topicHandlerMap']
             let clientToken:string
-            process.nextTick(() => {
-                const called = connection.publish.calledWith(topic)
-                if (called) {
-                    const calls = connection.publish.getCalls()
-                    calls.forEach(value => {
-                        if (topic==value.args[0]){
-                            const message = JSON.parse(value.args[1] as string)
-                            clientToken = message.clientToken
-                            const updateTopic = getShadowDocumentsTopic(endpointId)
-                            emitTopic(topicHandlerMap,updateTopic,updateTopic,{
-                                clientToken
-                            })
-                        }
+            connection.publish.callsFake((topic,payload,qos,retain)=>{
+                if (topic===updateTopic){
+                    const message = JSON.parse(payload as string)
+                    clientToken = message.clientToken
+                    const updateShadowTopic = getShadowDocumentsTopic(endpointId)
+                    emitTopic(topicHandlerMap,updateShadowTopic,updateShadowTopic,{
+                        clientToken
                     })
+
                 }
+                return Promise.resolve({})
             })
             await endpointConnector.completeDeltaState(deltaId);
-            sandbox.assert.calledWith(connection.publish, topic, JSON.stringify({
+            sandbox.assert.calledWith(connection.publish, updateTopic, JSON.stringify({
                 shadowName: endpointId,
                 thingName: clientId,
                 state: {
